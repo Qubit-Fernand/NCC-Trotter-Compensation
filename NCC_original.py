@@ -277,9 +277,9 @@ def main():
     print("total evolution fluctuation:\n", total_fluctuation)
     print("total evolution expectation bias:\n", total_bias)
 
-    data_dir = Path("data")
+    data_dir = Path("data_local_unitary_list")
     data_dir.mkdir(parents=True, exist_ok=True)
-    output_path = data_dir / f"results_{args.trials}.npz"
+    output_path = data_dir / f"NCC_original_trials{args.trials}.npz"
     print("saving results to:", output_path)
     np.savez(
         output_path,

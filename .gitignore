@@ -15,5 +15,7 @@ __pycache__/
 # Jupyter
 .ipynb_checkpoints/
 
-# Local generated experiment outputs
-data/
+# Archived local outputs and scripts
+archive/
+data_local_unitary_list/
+notebook/

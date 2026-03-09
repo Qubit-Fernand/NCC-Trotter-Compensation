@@ -2,6 +2,7 @@ import argparse
 import itertools
 import math
 from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
 from scipy.linalg import expm, logm
@@ -32,12 +33,6 @@ def parse_args():
         type=int,
         default=0,
         help="max compensated order (0 => ceil(log(4/epsilon)))",
-    )
-    parser.add_argument(
-        "--sampling",
-        choices=["uniform", "weighted"],
-        default="uniform",
-        help="term sampling inside each commutator order",
     )
     return parser.parse_args()
 
@@ -237,7 +232,7 @@ def pauli_rotation(pauli, phase, angle, identity):
 
 
 @lru_cache(maxsize=None)
-def build_log_static_data(n, epsilon, j=1.0, h=1.0, sampling="weighted", kappa=1, s0=None):
+def build_log_static_data(n, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
     """Precompute r-independent data for log-NCC evaluation."""
     if s0 is None:
         s0 = max(3, int(np.ceil(np.log(4 / epsilon))))
@@ -261,7 +256,7 @@ def build_log_static_data(n, epsilon, j=1.0, h=1.0, sampling="weighted", kappa=1
         phi_l1[order] = phi_q_l1
 
         terms, weighted_probs, l1_norm = pauli_decomposition(tilde_f_terms[order], basis)
-        probs = weighted_probs if sampling == "weighted" else np.ones(len(terms), dtype=float) / len(terms)
+        probs = weighted_probs
         order_data[order] = {"kind": "tail", "terms": terms, "probs": probs, "l1_norm": l1_norm}
         tilde_f_l1[order] = l1_norm
 
@@ -279,7 +274,7 @@ def build_log_static_data(n, epsilon, j=1.0, h=1.0, sampling="weighted", kappa=1
             order_data[order] = {
                 "kind": "pair",
                 "terms": pair_terms,
-                "probs": pair_probs if sampling == "weighted" else probs,
+                "probs": pair_probs,
                 "l1_norm": l1_norm,
             }
         else:
@@ -303,9 +298,9 @@ def build_log_static_data(n, epsilon, j=1.0, h=1.0, sampling="weighted", kappa=1
     }
 
 
-def build_log_tilde_v(n, t_total, r, epsilon, j=1.0, h=1.0, sampling="weighted", kappa=1, s0=None):
+def build_log_tilde_v(n, t_total, r, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
     """Build the compensated single-step expectation operator tilde_V."""
-    static = build_log_static_data(n, epsilon, j=j, h=h, sampling=sampling, kappa=kappa, s0=s0)
+    static = build_log_static_data(n, epsilon, j=j, h=h, kappa=kappa, s0=s0)
     a_mat = static["a_mat"]
     b_mat = static["b_mat"]
     identity = static["identity"]
@@ -351,17 +346,17 @@ def build_log_tilde_v(n, t_total, r, epsilon, j=1.0, h=1.0, sampling="weighted",
 
 
 @lru_cache(maxsize=None)
-def exact_log_total_error(n, t_total, r, epsilon, j=1.0, h=1.0, sampling="weighted", kappa=1, s0=None):
+def exact_log_total_error(n, t_total, r, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
     """Return ||(tilde_V S_1)^r - U_exact||_2 for the deterministic expectation operator."""
-    data = build_log_tilde_v(n, t_total, r, epsilon, j=j, h=h, sampling=sampling, kappa=kappa, s0=s0)
+    data = build_log_tilde_v(n, t_total, r, epsilon, j=j, h=h, kappa=kappa, s0=s0)
     return np.linalg.norm(np.linalg.matrix_power(data["tilde_v"] @ data["s1"], r) - data["u_exact"], 2)
 
 
-def find_min_segments_log(n, t_total, epsilon, j=1.0, h=1.0, sampling="weighted", r_max=512, kappa=1, s0=None):
+def find_min_segments_log(n, t_total, epsilon, j=1.0, h=1.0, r_max=512, kappa=1, s0=None):
     """Binary search the smallest r with deterministic log-NCC error <= epsilon."""
     low = 1
     high = 1
-    err_high = exact_log_total_error(n, t_total, high, epsilon, j=j, h=h, sampling=sampling, kappa=kappa, s0=s0)
+    err_high = exact_log_total_error(n, t_total, high, epsilon, j=j, h=h, kappa=kappa, s0=s0)
     while err_high > epsilon and high < r_max:
         low = high
         high *= 2
@@ -372,7 +367,6 @@ def find_min_segments_log(n, t_total, epsilon, j=1.0, h=1.0, sampling="weighted"
             epsilon,
             j=j,
             h=h,
-            sampling=sampling,
             kappa=kappa,
             s0=s0,
         )
@@ -381,7 +375,7 @@ def find_min_segments_log(n, t_total, epsilon, j=1.0, h=1.0, sampling="weighted"
 
     while low + 1 < high:
         mid = (low + high) // 2
-        err_mid = exact_log_total_error(n, t_total, mid, epsilon, j=j, h=h, sampling=sampling, kappa=kappa, s0=s0)
+        err_mid = exact_log_total_error(n, t_total, mid, epsilon, j=j, h=h, kappa=kappa, s0=s0)
         if err_mid <= epsilon:
             high = mid
             err_high = err_mid
@@ -420,8 +414,8 @@ def main():
     print("Lemma 3 condition 8e(a_max*kappa+1)q0kg t <= 1:", cond_bch_truncation)
     print("Lemma 5 condition e*lambda_comm*t <= 1:", cond_finite_s_truncation)
 
-    static = build_log_static_data(n, epsilon, j=j, h=h, sampling=args.sampling, kappa=kappa, s0=s0)
-    step_data = build_log_tilde_v(n, t_total, r, epsilon, j=j, h=h, sampling=args.sampling, kappa=kappa, s0=s0)
+    static = build_log_static_data(n, epsilon, j=j, h=h, kappa=kappa, s0=s0)
+    step_data = build_log_tilde_v(n, t_total, r, epsilon, j=j, h=h, kappa=kappa, s0=s0)
     a_mat = static["a_mat"]
     b_mat = static["b_mat"]
     phi_terms = static["phi_terms"]
@@ -540,9 +534,9 @@ def main():
     print("multi-step sample fluctuation:", total_sample_fluctuation)
     print("multi-step expectation bias:", total_expectation_bias)
 
-    data_dir = Path("data")
+    data_dir = Path("data_local_unitary_list")
     data_dir.mkdir(parents=True, exist_ok=True)
-    out = data_dir / f"results_log_{args.sampling}_trials{trials}_s0{s0}.npz"
+    out = data_dir / f"results_log_weighted_trials{trials}_s0{s0}.npz"
     np.savez(
         out,
         A=a_mat,
@@ -576,7 +570,7 @@ def main():
         theta=theta_pair,
         eta_sum=eta_pair_sum,
         raw_total=raw_total,
-        sampling=args.sampling,
+        sampling="weighted",
         cond_bch_truncation=cond_bch_truncation,
         cond_finite_s_truncation=cond_finite_s_truncation,
     )

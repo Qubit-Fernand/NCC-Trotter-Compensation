@@ -10,8 +10,10 @@ from tqdm import tqdm
 from NCC_log import build_log_static_data, build_log_tilde_v
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Sampling-based r_min search for NCC_log.")
+def build_parser():
+    parser = argparse.ArgumentParser(description="Sampling-based r_min search for log-NCC.")
+    parser.add_argument("--out-dir", type=Path, default=Path("data"), help="output directory")
+    parser.add_argument("--tag", type=str, default="", help="optional suffix for output file names")
     parser.add_argument("--N", type=int, default=6, help="number of spins")
     parser.add_argument("--J", type=float, default=1.0, help="interaction strength")
     parser.add_argument("--h", type=float, default=1.0, help="field strength")
@@ -21,11 +23,13 @@ def parse_args():
     parser.add_argument("--repeats", type=int, default=10, help="number of repeated r_min searches")
     parser.add_argument("--seed", type=int, default=7, help="base RNG seed")
     parser.add_argument("--r-max", type=int, default=512, help="maximal r allowed during search")
-    parser.add_argument("--sampling", choices=["uniform", "weighted"], default="weighted")
     parser.add_argument("--s0", type=int, default=0, help="override log truncation order")
     parser.add_argument("--save-every-eval", action="store_true", help="checkpoint after every sampled r evaluation")
-    parser.add_argument("--tag", type=str, default="", help="optional suffix for output file names")
-    return parser.parse_args()
+    return parser
+
+
+def parse_args(argv=None):
+    return build_parser().parse_args(argv)
 
 
 def pauli_rotation(pauli: np.ndarray, phase: complex, angle: float, identity: np.ndarray) -> np.ndarray:
@@ -46,13 +50,50 @@ def confidence_interval(values: np.ndarray) -> tuple[float, float, float]:
     return mean, mean - half_width, mean + half_width
 
 
-def save_checkpoint(out_base: Path, payload: dict):
+def effective_log_s0(epsilon: float, requested_s0: int) -> int:
+    if requested_s0 > 0:
+        return max(3, int(requested_s0))
+    return max(3, int(np.ceil(np.log(4 / epsilon))))
+
+
+def effective_log_q0(n: int, epsilon: float) -> int:
+    return int(np.ceil(np.log(4 * n / epsilon)))
+
+
+def resolve_output_dir(base_out_dir: Path, tag: str) -> Path:
+    out_dir = base_out_dir / "smoke" if "smoke" in tag.lower() else base_out_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir
+
+
+def normalized_tag_suffix(tag: str) -> str:
+    if not tag:
+        return ""
+    if "smoke" in tag.lower():
+        return "_smoke"
+    return f"_{tag}"
+
+
+def sampling_out_base(args) -> Path:
+    suffix = normalized_tag_suffix(args.tag)
+    actual_s0 = effective_log_s0(args.epsilon, args.s0)
+    default_s0 = effective_log_s0(args.epsilon, 0)
+    s0_suffix = f"_s0{actual_s0}" if actual_s0 != default_s0 else ""
+    out_dir = resolve_output_dir(args.out_dir, args.tag)
+    return out_dir / (
+        f"NCC_log_sampling_r_N{args.N}_T{args.T:g}_eps{args.epsilon:g}_"
+        f"trials{args.trials}_repeats{args.repeats}{s0_suffix}{suffix}"
+    )
+
+
+def save_sampling_checkpoint(out_base: Path, payload: dict):
     json_path = Path(f"{out_base}.json")
     npz_path = Path(f"{out_base}.npz")
     json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
     np.savez(
         npz_path,
         r_mins=np.array(payload["r_mins"], dtype=int),
+        mean_r_mins=np.array(payload["mean_r_mins"], dtype=int),
         sample_errors=np.array(payload["sample_errors"], dtype=float),
         expectation_biases=np.array(payload["expectation_biases"], dtype=float),
         sample_fluctuations=np.array(payload["sample_fluctuations"], dtype=float),
@@ -65,6 +106,14 @@ def save_checkpoint(out_base: Path, payload: dict):
         eval_expectation_bias=np.array([item["expectation_bias"] for item in payload["evaluations"]], dtype=float),
         eval_sample_fluctuation=np.array([item["sample_fluctuation"] for item in payload["evaluations"]], dtype=float),
     )
+
+def extract_mean_r_min(evaluations: list[dict], repetition: int, epsilon: float) -> int | None:
+    candidates = sorted(
+        item["r"]
+        for item in evaluations
+        if item["repetition"] == repetition and item["expectation_bias"] <= epsilon
+    )
+    return int(candidates[0]) if candidates else None
 
 
 def sample_component(
@@ -91,12 +140,11 @@ def estimate_total_sample_error(
     seed: int,
     j: float,
     h: float,
-    sampling: str,
     s0: int,
 ):
     kappa = 1
-    static = build_log_static_data(n, epsilon, j=j, h=h, sampling=sampling, kappa=kappa, s0=s0 or None)
-    step_data = build_log_tilde_v(n, t_total, r, epsilon, j=j, h=h, sampling=sampling, kappa=kappa, s0=s0 or None)
+    static = build_log_static_data(n, epsilon, j=j, h=h, kappa=kappa, s0=s0 or None)
+    step_data = build_log_tilde_v(n, t_total, r, epsilon, j=j, h=h, kappa=kappa, s0=s0 or None)
     s_orders = static["s_orders"]
     order_data = static["order_data"]
     identity = static["identity"]
@@ -135,7 +183,6 @@ def find_r_min_sampling(
     r_max: int,
     j: float,
     h: float,
-    sampling: str,
     s0: int,
     evaluations: list[dict],
     progress_label: str,
@@ -156,7 +203,6 @@ def find_r_min_sampling(
             seed=seed,
             j=j,
             h=h,
-            sampling=sampling,
             s0=s0,
         )
         result["seed"] = seed
@@ -197,19 +243,14 @@ def find_r_min_sampling(
     return high, high_eval
 
 
-def main():
-    args = parse_args()
-    out_dir = Path("data")
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    suffix = f"_{args.tag}" if args.tag else ""
-    out_base = out_dir / (
-        f"log_sampling_{args.sampling}_N{args.N}_T{args.T:g}_eps{args.epsilon:g}_"
-        f"trials{args.trials}_repeats{args.repeats}_s0{args.s0 if args.s0 > 0 else 'auto'}{suffix}"
-    )
-
+def main(argv=None):
+    args = parse_args(argv)
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    out_base = sampling_out_base(args)
+    actual_s0 = effective_log_s0(args.epsilon, args.s0)
+    q_0 = effective_log_q0(args.N, args.epsilon)
     payload = {
-        "script": "NCC_log_sampling.py",
+        "script": "NCC_log_sampling_r.py",
         "params": {
             "N": args.N,
             "J": args.J,
@@ -218,12 +259,14 @@ def main():
             "epsilon": args.epsilon,
             "trials": args.trials,
             "repeats": args.repeats,
-            "seed": args.seed,
+            "base_seed": args.seed,
             "r_max": args.r_max,
-            "sampling": args.sampling,
-            "s0": args.s0,
+            "sampling": "weighted",
+            "s0": actual_s0,
+            "q_0": q_0,
         },
         "r_mins": [],
+        "mean_r_mins": [],
         "sample_errors": [],
         "expectation_biases": [],
         "sample_fluctuations": [],
@@ -232,19 +275,10 @@ def main():
         "evaluations": [],
     }
 
-    # Warm the cache before the first repetition so the expensive log objects are reused across r.
-    build_log_static_data(
-        args.N,
-        args.epsilon,
-        j=args.J,
-        h=args.h,
-        sampling=args.sampling,
-        kappa=1,
-        s0=args.s0 or None,
-    )
+    build_log_static_data(args.N, args.epsilon, j=args.J, h=args.h, kappa=1, s0=actual_s0)
 
     def checkpoint():
-        save_checkpoint(out_base, payload)
+        save_sampling_checkpoint(out_base, payload)
 
     for repetition in range(args.repeats):
         label = f"[repeat {repetition + 1}/{args.repeats}]"
@@ -258,22 +292,23 @@ def main():
             r_max=args.r_max,
             j=args.J,
             h=args.h,
-            sampling=args.sampling,
-            s0=args.s0,
+            s0=actual_s0,
             evaluations=payload["evaluations"],
             progress_label=label,
             checkpoint_cb=checkpoint if args.save_every_eval else None,
         )
         payload["r_mins"].append(int(r_min))
+        mean_r_min = extract_mean_r_min(payload["evaluations"], repetition, args.epsilon)
+        payload["mean_r_mins"].append(-1 if mean_r_min is None else int(mean_r_min))
         payload["sample_errors"].append(float(metrics["sample_error"]))
         payload["expectation_biases"].append(float(metrics["expectation_bias"]))
         payload["sample_fluctuations"].append(float(metrics["sample_fluctuation"]))
         _, ci_low, ci_high = confidence_interval(np.array(payload["r_mins"], dtype=float))
         payload["ci_low_history"].append(ci_low)
         payload["ci_high_history"].append(ci_high)
-        save_checkpoint(out_base, payload)
+        save_sampling_checkpoint(out_base, payload)
         print(
-            f"{label} r_min={r_min}, current mean={np.mean(payload['r_mins']):.3f}, "
+            f"{label} r_min={r_min}, mean_r_min={mean_r_min}, current mean={np.mean(payload['r_mins']):.3f}, "
             f"95% CI=[{ci_low:.3f}, {ci_high:.3f}]"
         )
 
@@ -281,6 +316,7 @@ def main():
     mean, ci_low, ci_high = confidence_interval(r_mins)
     print("finished search")
     print(f"r_min samples: {payload['r_mins']}")
+    print(f"mean r_min samples: {payload['mean_r_mins']}")
     print(f"mean r_min: {mean:.3f}")
     print(f"95% CI for mean r_min: [{ci_low:.3f}, {ci_high:.3f}]")
     print(f"saved checkpoint to: {Path(f'{out_base}.json')}")
