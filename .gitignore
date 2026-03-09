@@ -1,0 +1,16 @@
+.DS_Store
+
+# Local editor and history artifacts
+.history/
+.vscode/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Jupyter
+.ipynb_checkpoints/
