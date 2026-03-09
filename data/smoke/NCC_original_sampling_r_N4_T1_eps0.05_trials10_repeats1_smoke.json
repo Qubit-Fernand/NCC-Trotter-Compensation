@@ -12,12 +12,6 @@
     "base_seed": 7,
     "r_max": 16
   },
-  "r_mins": [
-    13
-  ],
-  "mean_r_mins": [
-    8
-  ],
   "sample_errors": [
     0.04481133273682018
   ],
@@ -130,5 +124,11 @@
       "eta3": 0.007282658170232136,
       "seed": 13124
     }
+  ],
+  "expected_r_mins": [
+    8
+  ],
+  "sampled_r_mins": [
+    13
   ]
 }

@@ -185,8 +185,8 @@ def save_sampling_checkpoint(out_base: Path, payload: dict):
     json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
     np.savez(
         npz_path,
-        r_mins=np.array(payload["r_mins"], dtype=int),
-        mean_r_mins=np.array(payload["mean_r_mins"], dtype=int),
+        sampled_r_mins=np.array(payload["sampled_r_mins"], dtype=int),
+        expected_r_mins=np.array(payload["expected_r_mins"], dtype=int),
         sample_errors=np.array(payload["sample_errors"], dtype=float),
         expectation_biases=np.array(payload["expectation_biases"], dtype=float),
         sample_fluctuations=np.array(payload["sample_fluctuations"], dtype=float),
@@ -199,15 +199,6 @@ def save_sampling_checkpoint(out_base: Path, payload: dict):
         eval_expectation_bias=np.array([item["expectation_bias"] for item in payload["evaluations"]], dtype=float),
         eval_sample_fluctuation=np.array([item["sample_fluctuation"] for item in payload["evaluations"]], dtype=float),
     )
-
-def extract_mean_r_min(evaluations: list[dict], repetition: int, epsilon: float) -> int | None:
-    candidates = sorted(
-        item["r"]
-        for item in evaluations
-        if item["repetition"] == repetition and item["expectation_bias"] <= epsilon
-    )
-    return int(candidates[0]) if candidates else None
-
 
 def find_r_min_sampling(
     static: OriginalStaticData,
@@ -239,25 +230,30 @@ def find_r_min_sampling(
             checkpoint_cb()
         return result
 
-    low = 0
-    high = 1
-    high_eval = evaluate(high)
-    while high_eval["sample_error"] > epsilon and high < r_max:
-        low = high
-        high *= 2
+    def find_min_by(metric_key: str) -> tuple[int, dict]:
+        low = 0
+        high = 1
         high_eval = evaluate(high)
-    if high_eval["sample_error"] > epsilon:
-        raise RuntimeError(f"failed to reach epsilon={epsilon} by r={r_max}")
+        while high_eval[metric_key] > epsilon and high < r_max:
+            low = high
+            high *= 2
+            high_eval = evaluate(high)
+        if high_eval[metric_key] > epsilon:
+            raise RuntimeError(f"failed to reach epsilon={epsilon} by r={r_max} for {metric_key}")
 
-    while low + 1 < high:
-        mid = (low + high) // 2
-        mid_eval = evaluate(mid)
-        if mid_eval["sample_error"] <= epsilon:
-            high = mid
-            high_eval = mid_eval
-        else:
-            low = mid
-    return high, high_eval
+        while low + 1 < high:
+            mid = (low + high) // 2
+            mid_eval = evaluate(mid)
+            if mid_eval[metric_key] <= epsilon:
+                high = mid
+                high_eval = mid_eval
+            else:
+                low = mid
+        return high, high_eval
+
+    sampled_r_min, sampled_eval = find_min_by("sample_error")
+    expected_r_min, _ = find_min_by("expectation_bias")
+    return sampled_r_min, sampled_eval, expected_r_min
 
 
 def main(argv=None):
@@ -278,8 +274,8 @@ def main(argv=None):
             "base_seed": args.seed,
             "r_max": args.r_max,
         },
-        "r_mins": [],
-        "mean_r_mins": [],
+        "sampled_r_mins": [],
+        "expected_r_mins": [],
         "sample_errors": [],
         "expectation_biases": [],
         "sample_fluctuations": [],
@@ -289,18 +285,18 @@ def main(argv=None):
     }
 
     def checkpoint():
-        current = np.array(payload["r_mins"], dtype=float) if payload["r_mins"] else np.array([], dtype=float)
+        current = np.array(payload["sampled_r_mins"], dtype=float) if payload["sampled_r_mins"] else np.array([], dtype=float)
         if current.size > 0:
             _, low, high = confidence_interval(current)
         else:
             low = high = float("nan")
-        payload["ci_low_history"] = payload["ci_low_history"][: len(payload["r_mins"])]
-        payload["ci_high_history"] = payload["ci_high_history"][: len(payload["r_mins"])]
+        payload["ci_low_history"] = payload["ci_low_history"][: len(payload["sampled_r_mins"])]
+        payload["ci_high_history"] = payload["ci_high_history"][: len(payload["sampled_r_mins"])]
         save_sampling_checkpoint(out_base, payload)
 
     for repetition in range(args.repeats):
         label = f"[repeat {repetition + 1}/{args.repeats}]"
-        r_min, metrics = find_r_min_sampling(
+        sampled_r_min, metrics, expected_r_min = find_r_min_sampling(
             static=static,
             t_total=args.T,
             epsilon=args.epsilon,
@@ -312,28 +308,27 @@ def main(argv=None):
             progress_label=label,
             checkpoint_cb=checkpoint if args.save_every_eval else None,
         )
-        payload["r_mins"].append(int(r_min))
-        mean_r_min = extract_mean_r_min(payload["evaluations"], repetition, args.epsilon)
-        payload["mean_r_mins"].append(-1 if mean_r_min is None else int(mean_r_min))
+        payload["sampled_r_mins"].append(int(sampled_r_min))
+        payload["expected_r_mins"].append(-1 if expected_r_min is None else int(expected_r_min))
         payload["sample_errors"].append(float(metrics["sample_error"]))
         payload["expectation_biases"].append(float(metrics["expectation_bias"]))
         payload["sample_fluctuations"].append(float(metrics["sample_fluctuation"]))
-        _, ci_low, ci_high = confidence_interval(np.array(payload["r_mins"], dtype=float))
+        _, ci_low, ci_high = confidence_interval(np.array(payload["sampled_r_mins"], dtype=float))
         payload["ci_low_history"].append(ci_low)
         payload["ci_high_history"].append(ci_high)
         save_sampling_checkpoint(out_base, payload)
         print(
-            f"{label} r_min={r_min}, mean_r_min={mean_r_min}, current mean={np.mean(payload['r_mins']):.3f}, "
+            f"{label} sampled_r_min={sampled_r_min}, expected_r_min={expected_r_min}, current mean={np.mean(payload['sampled_r_mins']):.3f}, "
             f"95% CI=[{ci_low:.3f}, {ci_high:.3f}]"
         )
 
-    r_mins = np.array(payload["r_mins"], dtype=float)
-    mean, ci_low, ci_high = confidence_interval(r_mins)
+    sampled_r_mins = np.array(payload["sampled_r_mins"], dtype=float)
+    mean, ci_low, ci_high = confidence_interval(sampled_r_mins)
     print("finished search")
-    print(f"r_min samples: {payload['r_mins']}")
-    print(f"mean r_min samples: {payload['mean_r_mins']}")
-    print(f"mean r_min: {mean:.3f}")
-    print(f"95% CI for mean r_min: [{ci_low:.3f}, {ci_high:.3f}]")
+    print(f"sampled r_min samples: {payload['sampled_r_mins']}")
+    print(f"expected r_min samples: {payload['expected_r_mins']}")
+    print(f"sampled r_min mean: {mean:.3f}")
+    print(f"95% CI for sampled r_min mean: [{ci_low:.3f}, {ci_high:.3f}]")
     print(f"saved checkpoint to: {Path(f'{out_base}.json')}")
     print(f"saved arrays to: {Path(f'{out_base}.npz')}")
 

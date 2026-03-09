@@ -14,12 +14,6 @@
     "sampling": "weighted",
     "s0": 0
   },
-  "r_mins": [
-    16
-  ],
-  "mean_r_mins": [
-    8
-  ],
   "sample_errors": [
     0.03858609847721449
   ],
@@ -124,5 +118,11 @@
       "raw_total": 1.0004249108367627,
       "seed": 15142
     }
+  ],
+  "expected_r_mins": [
+    8
+  ],
+  "sampled_r_mins": [
+    16
   ]
 }
