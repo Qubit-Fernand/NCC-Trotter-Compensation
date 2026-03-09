@@ -304,20 +304,30 @@ def main():
             return compensation_unitary(phase * pauli, theta_pair)
         return phase * pauli
 
-    def mean_component(order):
-        data = order_data[order]
-        component = np.zeros((2**n, 2**n), dtype=complex)
-        for prob, (phase, pauli) in zip(data["probs"], data["terms"]):
-            if data["kind"] == "pair":
-                component += prob * compensation_unitary(phase * pauli, theta_pair)
-            else:
-                component += prob * (phase * pauli)
-        return component
+    """The expectatiion value of the sampled component, two ways to compute"""
 
-    hybrid_target = np.zeros((2**n, 2**n), dtype=complex)
-    for order in s_orders:
-        hybrid_target += raw_weights[order] * mean_component(order)
+    def tilde_V():
+        tilde_v = np.zeros((2**n, 2**n), dtype=complex)
+        for order in s_orders:
+            data = order_data[order]
+            for prob, (phase, pauli) in zip(data["probs"], data["terms"]):
+                if data["kind"] == "pair":
+                    tilde_v += raw_weights[order] * prob * compensation_unitary(phase * pauli, theta_pair)
+                else:
+                    tilde_v += raw_weights[order] * prob * (phase * pauli)
+        return tilde_v
 
+    def tilde_V_taylor():
+        tilde_v = np.eye(2**n, dtype=complex)
+        for order in s_orders:
+            tilde_v += tilde_f_terms[order] * (t**order)
+        return tilde_v
+
+    tilde_v = tilde_V()
+    tilde_v_taylor = tilde_V_taylor()
+    print("tilde_V compensate-vs-Taylor:", np.linalg.norm(tilde_v - tilde_v_taylor, 2))
+
+    # Sampling start here
     def NCC_sampling(num_trials):
         v_list = []
         for _ in tqdm(range(num_trials), desc="single step trials"):
@@ -327,11 +337,16 @@ def main():
         return v_list, v_average
 
     single_step_error_before = np.linalg.norm(s1 - expm(-1j * (a_mat + b_mat) * t), 2)
-    print("single error before:", single_step_error_before)
+    print("single-step error before:", single_step_error_before)
 
     v_list, v_avg = NCC_sampling(trials)
-    single_step_error_after = np.linalg.norm(v_avg - hybrid_target, 2)
-    print("single error after:", single_step_error_after)
+    single_step_fluctuation = np.linalg.norm(v_avg - tilde_v, 2)
+    single_step_sample_error = np.linalg.norm(v_avg - v_exact, 2)
+    single_step_expectation_bias = np.linalg.norm(tilde_v - v_exact, 2)
+
+    print("single-step sample error after compensation:", single_step_sample_error)
+    print("single-step sample fluctuation:", single_step_fluctuation)
+    print("single-step expectation bias:", single_step_expectation_bias)
 
     def multi_step_NCC_sampling(num_trials):
         evo_list = []
@@ -348,9 +363,14 @@ def main():
     print("total error before:", total_error_before)
 
     evo_list, evo_avg = multi_step_NCC_sampling(trials)
-    total_error_after = np.linalg.norm(evo_avg - np.linalg.matrix_power(hybrid_target @ s1, r), 2)
-    print("total error after:", total_error_after)
-    print("hybrid target vs V_exact:", np.linalg.norm(hybrid_target - v_exact, 2))
+
+    total_sample_fluctuation = np.linalg.norm(evo_avg - np.linalg.matrix_power(tilde_v @ s1, r), 2)
+    total_sample_error = np.linalg.norm(evo_avg - u_exact, 2)
+    total_expectation_bias = np.linalg.norm(np.linalg.matrix_power(tilde_v @ s1, r) - u_exact, 2)
+
+    print("multi-step sample error after compensation:", total_sample_error)
+    print("multi-step sample fluctuation:", total_sample_fluctuation)
+    print("multi-step expectation bias:", total_expectation_bias)
 
     data_dir = Path("data")
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -360,17 +380,22 @@ def main():
         A=a_mat,
         B=b_mat,
         S=s1,
+        V_tilde=tilde_v,
+        V_tilde_taylor=tilde_v_taylor,
         V_exact=v_exact,
         V_average=v_avg,
-        V_hybrid_target=hybrid_target,
         evolution_average=evo_avg,
         phi_orders=np.array(s_orders, dtype=int),
         phi_matrices=np.stack([phi_terms[s] for s in s_orders]),
         tilde_f_matrices=np.stack([tilde_f_terms[s] for s in s_orders]),
         single_step_error_before=single_step_error_before,
-        single_step_error_after=single_step_error_after,
+        single_step_sample_error=single_step_sample_error,
+        single_step_fluctuation=single_step_fluctuation,
+        single_step_expectation_bias=single_step_expectation_bias,
         total_error_before=total_error_before,
-        total_error_after=total_error_after,
+        total_sample_fluctuation=total_sample_fluctuation,
+        total_sample_error=total_sample_error,
+        total_expectation_bias=total_expectation_bias,
         N=n,
         J=j,
         h=h,

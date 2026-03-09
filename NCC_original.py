@@ -209,14 +209,13 @@ def main():
     def sample_component(rng, s):
         return compensation_unitary(sample_W_from_commutator(rng, s), theta)
 
-    def mean_component(s):
-        data = order_data.get(s)
-        if data is None:
-            raise ValueError(f"unsupported order s={s}")
-        return sum(
-            prob * compensation_unitary(sign * pauli, theta)
-            for prob, (sign, pauli) in zip(data["probs"], data["terms"])
-        )
+    def tilde_V():
+        tilde_v = np.zeros((2**N, 2**N), dtype=complex)
+        for s, p in zip([2, 3], p_s):
+            data = order_data[s]
+            for prob, (sign, pauli) in zip(data["probs"], data["terms"]):
+                tilde_v += p * prob * compensation_unitary(sign * pauli, theta)
+        return tilde_v
 
     # K = 1, sample from s = 2, 3
     def NCC_sampling(trials):
@@ -237,9 +236,15 @@ def main():
     single_step_error_before = np.linalg.norm(S - expm(-1j * (A + B) * t), 2)
     print("single Trotter step error before compensation:\n", single_step_error_before)
 
+    tilde_v = tilde_V()
     V_list, V_average = NCC_sampling(trials=args.trials)
     single_step_error_after = np.linalg.norm(V_average - V_exact, 2)
-    print("single Trotter step error after compensation:\n", single_step_error_after)
+    single_step_fluctuation = np.linalg.norm(V_average - tilde_v, 2)
+    single_step_bias = np.linalg.norm(tilde_v - V_exact, 2)
+
+    print("single step error after compensation:\n", single_step_error_after)
+    print("single step fluctuation:\n", single_step_fluctuation)
+    print("single step expectation bias:\n", single_step_bias)
 
     def multi_step_NCC_sampling(trials):
         rng = np.random.default_rng(seed=7)
@@ -265,7 +270,12 @@ def main():
 
     evolution_list, evolution_average = multi_step_NCC_sampling(trials=args.trials)
     total_error_after = np.linalg.norm(evolution_average - evolution_exact, 2)
+    total_fluctuation = np.linalg.norm(evolution_average - np.linalg.matrix_power(tilde_v @ S, r), 2)
+    total_bias = np.linalg.norm(np.linalg.matrix_power(tilde_v @ S, r) - evolution_exact, 2)
+
     print("total evolution error after compensation:\n", total_error_after)
+    print("total evolution fluctuation:\n", total_fluctuation)
+    print("total evolution expectation bias:\n", total_bias)
 
     data_dir = Path("data")
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -276,6 +286,7 @@ def main():
         A=A,
         B=B,
         S=S,
+        V_tilde=tilde_v,
         V_exact=V_exact,
         V_average=V_average,
         V_list=np.array(V_list, dtype=object),
@@ -283,8 +294,12 @@ def main():
         evolution_list=np.array(evolution_list, dtype=object),
         single_step_error_before=single_step_error_before,
         single_step_error_after=single_step_error_after,
+        single_step_fluctuation=single_step_fluctuation,
+        single_step_bias=single_step_bias,
         total_error_before=total_error_before,
         total_error_after=total_error_after,
+        total_fluctuation=total_fluctuation,
+        total_bias=total_bias,
         N=N,
         J=J,
         h=h,

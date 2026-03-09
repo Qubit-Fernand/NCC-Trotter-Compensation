@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from NCC_log import build_periodic_ab, commutator, phi_term, tilde_F_term
+from NCC_log import build_periodic_ab, commutator, pauli_basis, pauli_decomposition, phi_term, tilde_F_term
 
 
 def reference_phi_terms_k1(a_mat, b_mat):
@@ -36,6 +36,7 @@ def validate_phi_and_tilde_f(n=4, j=1.0, h=1.0, t=0.05, k_order=1, s0=4):
     phi_terms, _ = phi_term(a_mat, b_mat, s0, base_step=min(t, 0.02))
     tilde_f_terms = tilde_F_term(phi_terms, k_order, s0, s0)
     ref_phi = reference_phi_terms_k1(a_mat, b_mat)
+    basis = pauli_basis(n)
 
     metrics = {}
     for q in sorted(ref_phi):
@@ -55,6 +56,44 @@ def validate_phi_and_tilde_f(n=4, j=1.0, h=1.0, t=0.05, k_order=1, s0=4):
         taylor_eval += term * (t**s)
     truncated_exp_eval = truncated_bch_exponential(phi_terms, t, k_order, s0)
     metrics["taylor_vs_exp_error"] = np.linalg.norm(taylor_eval - truncated_exp_eval, 2)
+
+    eta = {}
+    order_data = {}
+    for order in range(2, s0 + 1):
+        terms, weighted_probs, l1_norm = pauli_decomposition(tilde_f_terms[order], basis)
+        order_data[order] = {"kind": "tail", "terms": terms, "probs": weighted_probs, "l1_norm": l1_norm}
+        eta[order] = l1_norm * (t**order)
+        antiherm_err = np.linalg.norm(tilde_f_terms[order] + tilde_f_terms[order].conj().T, ord="fro")
+        if antiherm_err <= 1e-8:
+            pair_terms, pair_probs, _ = pauli_decomposition(
+                tilde_f_terms[order],
+                basis,
+                antihermitian=True,
+            )
+            order_data[order] = {"kind": "pair", "terms": pair_terms, "probs": pair_probs, "l1_norm": l1_norm}
+
+    s_orders = list(range(2, s0 + 1))
+    leading_orders = [s for s in s_orders if s <= 2 * k_order + 1]
+    tail_orders = [s for s in s_orders if s > 2 * k_order + 1]
+    eta_pair_sum = sum(eta[s] for s in leading_orders)
+    theta_pair = np.arctan(eta_pair_sum)
+    raw_weights = {}
+    if eta_pair_sum > 0:
+        for s in leading_orders:
+            raw_weights[s] = eta[s] / eta_pair_sum
+    for s in tail_orders:
+        raw_weights[s] = eta[s]
+
+    tilde_v_comp = np.zeros((2**n, 2**n), dtype=complex)
+    for order in s_orders:
+        data = order_data[order]
+        for prob, (phase, pauli) in zip(data["probs"], data["terms"]):
+            if data["kind"] == "pair":
+                tilde_v_comp += raw_weights[order] * prob * expm(1j * theta_pair * (phase * pauli))
+            else:
+                tilde_v_comp += raw_weights[order] * prob * (phase * pauli)
+
+    metrics["tilde_v_comp_vs_taylor"] = np.linalg.norm(tilde_v_comp - taylor_eval, 2)
     return metrics
 
 
@@ -69,6 +108,7 @@ def main():
     assert metrics["single_phi_regime_2"] < 1e-12
     assert metrics["single_phi_regime_3"] < 1e-12
     assert metrics["taylor_vs_exp_error"] < 1e-4
+    assert metrics["tilde_v_comp_vs_taylor"] < 5e-3
 
 
 if __name__ == "__main__":
