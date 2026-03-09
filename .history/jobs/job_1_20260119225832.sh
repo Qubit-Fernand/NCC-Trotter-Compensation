@@ -1,1 +1,0 @@
-python NCC_original.py --trials 1000000
