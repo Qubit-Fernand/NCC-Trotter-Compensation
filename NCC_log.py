@@ -1,6 +1,7 @@
 import argparse
 import itertools
 import math
+from functools import lru_cache
 
 import numpy as np
 from scipy.linalg import expm, logm
@@ -118,8 +119,12 @@ def phi_term_log_fit(a_mat, b_mat, q_max, base_step=None):
     return phi_terms, base_step
 
 
-def phi_term(a_mat, b_mat, q_max):
-    """Compute Phi_q directly from the BCH commutator formula in the PDF."""
+def phi_term(a_mat, b_mat, q_max, base_step=None):
+    """Compute Phi_q directly from the BCH commutator formula in the PDF.
+
+    ``base_step`` is accepted for backward compatibility with older notebook
+    code paths that used the archived log-fit extractor.
+    """
 
     def compositions(total, parts):
         if parts == 1:
@@ -225,6 +230,166 @@ def pauli_decomposition(mat, basis, antihermitian=False, tol=1e-10):
     return terms, probs_weighted, l1_norm
 
 
+def pauli_rotation(pauli, phase, angle, identity):
+    """Closed-form exp(i angle * phase * P) for a Hermitian Pauli P."""
+    signed_pauli = phase * pauli
+    return np.cos(angle) * identity + 1j * np.sin(angle) * signed_pauli
+
+
+@lru_cache(maxsize=None)
+def build_log_static_data(n, epsilon, j=1.0, h=1.0, sampling="weighted", kappa=1, s0=None):
+    """Precompute r-independent data for log-NCC evaluation."""
+    if s0 is None:
+        s0 = max(3, int(np.ceil(np.log(4 / epsilon))))
+    else:
+        s0 = max(3, int(s0))
+
+    a_mat, b_mat = build_periodic_ab(n, j, h)
+    basis = pauli_basis(n)
+    phi_terms, _ = phi_term(a_mat, b_mat, s0)
+    tilde_f_terms = tilde_F_term(phi_terms, kappa, s0, s0)
+    identity = np.eye(2**n, dtype=complex)
+
+    order_data = {}
+    phi_l1 = {}
+    tilde_f_l1 = {}
+    pairable_orders = []
+    non_pairable_orders = []
+    for order in range(kappa + 1, s0 + 1):
+        phi_q = phi_terms[order]
+        _, _, phi_q_l1 = pauli_decomposition(phi_q, basis, antihermitian=True)
+        phi_l1[order] = phi_q_l1
+
+        terms, weighted_probs, l1_norm = pauli_decomposition(tilde_f_terms[order], basis)
+        probs = weighted_probs if sampling == "weighted" else np.ones(len(terms), dtype=float) / len(terms)
+        order_data[order] = {"kind": "tail", "terms": terms, "probs": probs, "l1_norm": l1_norm}
+        tilde_f_l1[order] = l1_norm
+
+        antiherm_err = np.linalg.norm(
+            tilde_f_terms[order] + tilde_f_terms[order].conj().T,
+            ord="fro",
+        )
+        if antiherm_err <= 1e-8:
+            pair_terms, pair_probs, _ = pauli_decomposition(
+                tilde_f_terms[order],
+                basis,
+                antihermitian=True,
+            )
+            pairable_orders.append(order)
+            order_data[order] = {
+                "kind": "pair",
+                "terms": pair_terms,
+                "probs": pair_probs if sampling == "weighted" else probs,
+                "l1_norm": l1_norm,
+            }
+        else:
+            non_pairable_orders.append((order, float(antiherm_err)))
+
+    return {
+        "a_mat": a_mat,
+        "b_mat": b_mat,
+        "basis": basis,
+        "identity": identity,
+        "phi_terms": phi_terms,
+        "tilde_f_terms": tilde_f_terms,
+        "phi_l1": phi_l1,
+        "tilde_f_l1": tilde_f_l1,
+        "order_data": order_data,
+        "s_orders": list(range(kappa + 1, s0 + 1)),
+        "pairable_orders": pairable_orders,
+        "non_pairable_orders": non_pairable_orders,
+        "kappa": kappa,
+        "s0": s0,
+    }
+
+
+def build_log_tilde_v(n, t_total, r, epsilon, j=1.0, h=1.0, sampling="weighted", kappa=1, s0=None):
+    """Build the compensated single-step expectation operator tilde_V."""
+    static = build_log_static_data(n, epsilon, j=j, h=h, sampling=sampling, kappa=kappa, s0=s0)
+    a_mat = static["a_mat"]
+    b_mat = static["b_mat"]
+    identity = static["identity"]
+    s_orders = static["s_orders"]
+    order_data = static["order_data"]
+
+    t = t_total / r
+    s1 = expm(-1j * b_mat * t) @ expm(-1j * a_mat * t)
+    u_exact = expm(-1j * (a_mat + b_mat) * t_total)
+
+    eta = {order: order_data[order]["l1_norm"] * (t**order) for order in s_orders}
+    leading_orders = [s for s in s_orders if s <= 2 * kappa + 1]
+    tail_orders = [s for s in s_orders if s > 2 * kappa + 1]
+    eta_pair_sum = sum(eta[s] for s in leading_orders)
+    theta_pair = np.arctan(eta_pair_sum)
+
+    raw_weights = {}
+    if eta_pair_sum > 0:
+        for s in leading_orders:
+            raw_weights[s] = eta[s] / eta_pair_sum
+    for s in tail_orders:
+        raw_weights[s] = eta[s]
+
+    tilde_v = np.zeros_like(identity)
+    for order in s_orders:
+        data = order_data[order]
+        weight = raw_weights[order]
+        for prob, (phase, pauli) in zip(data["probs"], data["terms"]):
+            if data["kind"] == "pair":
+                tilde_v += weight * prob * pauli_rotation(pauli, phase, theta_pair, identity)
+            else:
+                tilde_v += weight * prob * (phase * pauli)
+
+    return {
+        "tilde_v": tilde_v,
+        "s1": s1,
+        "u_exact": u_exact,
+        "eta": eta,
+        "eta_pair_sum": eta_pair_sum,
+        "theta_pair": theta_pair,
+        "raw_weights": raw_weights,
+    }
+
+
+@lru_cache(maxsize=None)
+def exact_log_total_error(n, t_total, r, epsilon, j=1.0, h=1.0, sampling="weighted", kappa=1, s0=None):
+    """Return ||(tilde_V S_1)^r - U_exact||_2 for the deterministic expectation operator."""
+    data = build_log_tilde_v(n, t_total, r, epsilon, j=j, h=h, sampling=sampling, kappa=kappa, s0=s0)
+    return np.linalg.norm(np.linalg.matrix_power(data["tilde_v"] @ data["s1"], r) - data["u_exact"], 2)
+
+
+def find_min_segments_log(n, t_total, epsilon, j=1.0, h=1.0, sampling="weighted", r_max=512, kappa=1, s0=None):
+    """Binary search the smallest r with deterministic log-NCC error <= epsilon."""
+    low = 1
+    high = 1
+    err_high = exact_log_total_error(n, t_total, high, epsilon, j=j, h=h, sampling=sampling, kappa=kappa, s0=s0)
+    while err_high > epsilon and high < r_max:
+        low = high
+        high *= 2
+        err_high = exact_log_total_error(
+            n,
+            t_total,
+            high,
+            epsilon,
+            j=j,
+            h=h,
+            sampling=sampling,
+            kappa=kappa,
+            s0=s0,
+        )
+    if err_high > epsilon:
+        raise RuntimeError(f"failed to reach epsilon={epsilon} by r={r_max}")
+
+    while low + 1 < high:
+        mid = (low + high) // 2
+        err_mid = exact_log_total_error(n, t_total, mid, epsilon, j=j, h=h, sampling=sampling, kappa=kappa, s0=s0)
+        if err_mid <= epsilon:
+            high = mid
+            err_high = err_mid
+        else:
+            low = mid
+    return high, err_high
+
+
 def main():
     args = parse_args()
     n = args.N
@@ -237,12 +402,6 @@ def main():
     t = t_total / r
 
     print("time step:", t)
-
-    # Hamiltonian with periodic boundary condition
-    a_mat, b_mat = build_periodic_ab(n, j, h)
-    s1 = expm(-1j * b_mat * t) @ expm(-1j * a_mat * t)
-    v_exact = expm(-1j * (a_mat + b_mat) * t) @ expm(1j * a_mat * t) @ expm(1j * b_mat * t)
-    u_exact = expm(-1j * (a_mat + b_mat) * t_total)
 
     # q0/s0 and convergence checks from NCC_with_log_precision.pdf
     k_local = 2
@@ -261,60 +420,27 @@ def main():
     print("Lemma 3 condition 8e(a_max*kappa+1)q0kg t <= 1:", cond_bch_truncation)
     print("Lemma 5 condition e*lambda_comm*t <= 1:", cond_finite_s_truncation)
 
-    basis = pauli_basis(n)
-    phi_terms, phi_fit_step = phi_term(a_mat, b_mat, s0)
-    tilde_f_terms = tilde_F_term(phi_terms, kappa, s0, s0)
+    static = build_log_static_data(n, epsilon, j=j, h=h, sampling=args.sampling, kappa=kappa, s0=s0)
+    step_data = build_log_tilde_v(n, t_total, r, epsilon, j=j, h=h, sampling=args.sampling, kappa=kappa, s0=s0)
+    a_mat = static["a_mat"]
+    b_mat = static["b_mat"]
+    phi_terms = static["phi_terms"]
+    tilde_f_terms = static["tilde_f_terms"]
+    phi_l1 = static["phi_l1"]
+    tilde_f_l1 = static["tilde_f_l1"]
+    order_data = static["order_data"]
+    s_orders = static["s_orders"]
+    pairable_orders = static["pairable_orders"]
+    non_pairable_orders = static["non_pairable_orders"]
+    s1 = step_data["s1"]
+    tilde_v = step_data["tilde_v"]
+    u_exact = step_data["u_exact"]
+    eta = step_data["eta"]
+    eta_pair_sum = step_data["eta_pair_sum"]
+    theta_pair = step_data["theta_pair"]
+    raw_weights = step_data["raw_weights"]
+    v_exact = expm(-1j * (a_mat + b_mat) * t) @ expm(1j * a_mat * t) @ expm(1j * b_mat * t)
     print("Phi extraction method:", "direct BCH commutator formula")
-
-    order_data = {}
-    eta = {}
-    phi_l1 = {}
-    tilde_f_l1 = {}
-    pairable_orders = []
-    non_pairable_orders = []
-    for order in range(2, s0 + 1):
-        phi_q = phi_terms[order]
-        _, _, phi_q_l1 = pauli_decomposition(phi_q, basis, antihermitian=True)
-        phi_l1[order] = phi_q_l1
-        terms, weighted_probs, l1_norm = pauli_decomposition(tilde_f_terms[order], basis)
-        if args.sampling == "uniform":
-            probs = np.ones(len(terms), dtype=float) / len(terms)
-        else:
-            probs = weighted_probs
-        order_data[order] = {"kind": "tail", "terms": terms, "probs": probs, "l1_norm": l1_norm}
-        eta[order] = l1_norm * (t**order)
-        tilde_f_l1[order] = l1_norm
-        antiherm_err = np.linalg.norm(
-            tilde_f_terms[order] + tilde_f_terms[order].conj().T,
-            ord="fro",
-        )
-        if antiherm_err <= 1e-8:
-            pair_terms, pair_probs, _ = pauli_decomposition(
-                tilde_f_terms[order],
-                basis,
-                antihermitian=True,
-            )
-            pairable_orders.append(order)
-            order_data[order] = {
-                "kind": "pair",
-                "terms": pair_terms,
-                "probs": pair_probs if args.sampling == "weighted" else probs,
-                "l1_norm": l1_norm,
-            }
-        else:
-            non_pairable_orders.append((order, float(antiherm_err)))
-
-    s_orders = list(range(2, s0 + 1))
-    leading_orders = [s for s in s_orders if s <= 2 * kappa + 1]
-    tail_orders = [s for s in s_orders if s > 2 * kappa + 1]
-    eta_pair_sum = sum(eta[s] for s in leading_orders)
-    theta_pair = np.arctan(eta_pair_sum)
-    raw_weights = {}
-    if eta_pair_sum > 0:
-        for s in leading_orders:
-            raw_weights[s] = eta[s] / eta_pair_sum
-    for s in tail_orders:
-        raw_weights[s] = eta[s]
     raw_total = float(sum(raw_weights.values()))
     p_order = np.array([raw_weights[s] / raw_total for s in s_orders], dtype=float)
     print("eta_pair_sum:", eta_pair_sum, "theta_pair:", theta_pair)
@@ -333,7 +459,7 @@ def main():
         hermitian_err = np.linalg.norm(w_mat - w_mat.conj().T, ord="fro")
         if hermitian_err > atol:
             raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
-        return expm(1j * angle * w_mat)
+        return pauli_rotation(w_mat, 1.0, angle, static["identity"])
 
     def sample_component(order):
         data = order_data[order]
@@ -348,15 +474,15 @@ def main():
     """The expectatiion value of the sampled component, two ways to compute"""
 
     def tilde_V():
-        tilde_v = np.zeros((2**n, 2**n), dtype=complex)
+        tilde_v_local = np.zeros((2**n, 2**n), dtype=complex)
         for order in s_orders:
             data = order_data[order]
             for prob, (phase, pauli) in zip(data["probs"], data["terms"]):
                 if data["kind"] == "pair":
-                    tilde_v += raw_weights[order] * prob * compensation_unitary(phase * pauli, theta_pair)
+                    tilde_v_local += raw_weights[order] * prob * compensation_unitary(phase * pauli, theta_pair)
                 else:
-                    tilde_v += raw_weights[order] * prob * (phase * pauli)
-        return tilde_v
+                    tilde_v_local += raw_weights[order] * prob * (phase * pauli)
+        return tilde_v_local
 
     def tilde_V_taylor():
         tilde_v = np.eye(2**n, dtype=complex)
@@ -364,9 +490,10 @@ def main():
             tilde_v += tilde_f_terms[order] * (t**order)
         return tilde_v
 
-    tilde_v = tilde_V()
+    tilde_v_check = tilde_V()
     tilde_v_taylor = tilde_V_taylor()
     print("tilde_V compensate-vs-Taylor:", np.linalg.norm(tilde_v - tilde_v_taylor, 2))
+    print("tilde_V cached-vs-recomputed:", np.linalg.norm(tilde_v - tilde_v_check, 2))
 
     # Sampling start here
     def NCC_sampling(num_trials):
