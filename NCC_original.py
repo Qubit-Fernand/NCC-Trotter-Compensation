@@ -47,7 +47,7 @@ def pauli_basis(num_qubits):
     return basis
 
 
-def build_original_ab(num_qubits, coupling_j, field_h, heisenberg=False):
+def build_periodic_ab(num_qubits, coupling_j, field_h, heisenberg=False):
     def xx_term(index):
         if index < num_qubits - 1:
             return coupling_j * np.kron(
@@ -99,9 +99,9 @@ def build_original_ab(num_qubits, coupling_j, field_h, heisenberg=False):
     return a_mat, b_mat
 
 
-def pauli_decomposition(matrix, num_qubits, antihermitian=False, tol=1e-10):
-    """Decompose a matrix in the n-qubit Pauli basis."""
-    basis = pauli_basis(num_qubits)
+def pauli_decomposition(matrix, basis, antihermitian=False, tol=1e-10):
+    """Decompose a matrix in the Pauli basis."""
+    num_qubits = int(round(np.log2(matrix.shape[0])))
     scale = 2**num_qubits
     terms = []
     abs_weights = []
@@ -133,14 +133,6 @@ def pauli_decomposition(matrix, num_qubits, antihermitian=False, tol=1e-10):
     return terms, probs, total_weight
 
 
-def compensation_unitary(w_mat, theta, atol=1e-10):
-    """Build compensation unitary exp(i theta W) for Hermitian Pauli W."""
-    hermitian_err = np.linalg.norm(w_mat - w_mat.conj().T, ord="fro")
-    if hermitian_err > atol:
-        raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
-    return expm(1j * theta * w_mat)
-
-
 def main():
     args = parse_args()
 
@@ -164,7 +156,8 @@ def main():
 
     print("time step:", t)
 
-    A, B = build_original_ab(N, J, h, heisenberg=Heisenberg)
+    A, B = build_periodic_ab(N, J, h, heisenberg=Heisenberg)
+    basis = pauli_basis(N)
 
     # note the order of exp(A) and exp(B)
     S = expm(-1j * B * t) @ expm(-1j * A * t)
@@ -172,8 +165,11 @@ def main():
 
     C1 = commutator(B, A)
     C2 = 1j * (2 * commutator(B, commutator(A, B)) + commutator(A, commutator(A, B)))
-    c1_terms, c1_probs, c1_l1 = pauli_decomposition(C1, N, antihermitian=True)
-    c2_terms, c2_probs, c2_l1 = pauli_decomposition(C2, N, antihermitian=True)
+    order_data = {}
+    c1_terms, c1_probs, c1_l1 = pauli_decomposition(C1, basis, antihermitian=True)
+    c2_terms, c2_probs, c2_l1 = pauli_decomposition(C2, basis, antihermitian=True)
+    order_data[2] = {"terms": c1_terms, "probs": c1_probs, "l1_norm": c1_l1}
+    order_data[3] = {"terms": c2_terms, "probs": c2_probs, "l1_norm": c2_l1}
 
     eta2 = c1_l1 * (t**2) / 2
     eta3 = c2_l1 * (t**3) / 6
@@ -194,17 +190,33 @@ def main():
 
     evolution_exact = expm(-1j * (A + B) * t * r)
 
+    def compensation_unitary(w_mat, angle, atol=1e-10):
+        """Build compensation unitary exp(i angle W) for Hermitian Pauli W."""
+        hermitian_err = np.linalg.norm(w_mat - w_mat.conj().T, ord="fro")
+        if hermitian_err > atol:
+            raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
+        return expm(1j * angle * w_mat)
+
     def sample_W_from_commutator(rng, s):
         """Sample Hermitian Pauli W from strict commutator decomposition."""
-        if s == 2:
-            idx = int(rng.choice(len(c1_terms), p=c1_probs))
-            sign, P = c1_terms[idx]
-            return sign * P
-        if s == 3:
-            idx = int(rng.choice(len(c2_terms), p=c2_probs))
-            sign, P = c2_terms[idx]
-            return sign * P
-        raise ValueError(f"unsupported order s={s}")
+        data = order_data.get(s)
+        if data is None:
+            raise ValueError(f"unsupported order s={s}")
+        idx = int(rng.choice(len(data["terms"]), p=data["probs"]))
+        sign, pauli = data["terms"][idx]
+        return sign * pauli
+
+    def sample_component(rng, s):
+        return compensation_unitary(sample_W_from_commutator(rng, s), theta)
+
+    def mean_component(s):
+        data = order_data.get(s)
+        if data is None:
+            raise ValueError(f"unsupported order s={s}")
+        return sum(
+            prob * compensation_unitary(sign * pauli, theta)
+            for prob, (sign, pauli) in zip(data["probs"], data["terms"])
+        )
 
     # K = 1, sample from s = 2, 3
     def NCC_sampling(trials):
@@ -216,8 +228,7 @@ def main():
         V_list = []
         for _ in tqdm(range(trials), desc="single step trails"):
             s = int(rng.choice(s_list, p=p_s))
-            W = sample_W_from_commutator(rng, s)
-            V_list.append(compensation_unitary(W, theta))
+            V_list.append(sample_component(rng, s))
 
         V_average = sum(V_list) / trials
 
@@ -241,8 +252,7 @@ def main():
             evolution = np.eye(2**N, dtype=complex)
             for _ in range(r):
                 s = int(rng.choice(s_list, p=p_s))
-                W = sample_W_from_commutator(rng, s)
-                evolution = compensation_unitary(W, theta) @ S @ evolution
+                evolution = sample_component(rng, s) @ S @ evolution
 
             evolution_list.append(evolution)
 

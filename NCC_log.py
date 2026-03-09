@@ -184,14 +184,6 @@ def pauli_decomposition(mat, basis, antihermitian=False, tol=1e-10):
     return terms, probs_weighted, l1_norm
 
 
-def compensation_unitary(w_mat, theta, atol=1e-10):
-    """Build compensation unitary exp(i theta W) for Hermitian Pauli W."""
-    hermitian_err = np.linalg.norm(w_mat - w_mat.conj().T, ord="fro")
-    if hermitian_err > atol:
-        raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
-    return expm(1j * theta * w_mat)
-
-
 def main():
     args = parse_args()
     n = args.N
@@ -295,6 +287,13 @@ def main():
 
     rng = np.random.default_rng(seed=7)
 
+    def compensation_unitary(w_mat, angle, atol=1e-10):
+        """Build compensation unitary exp(i angle W) for Hermitian Pauli W."""
+        hermitian_err = np.linalg.norm(w_mat - w_mat.conj().T, ord="fro")
+        if hermitian_err > atol:
+            raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
+        return expm(1j * angle * w_mat)
+
     def sample_component(order):
         data = order_data[order]
         terms = data["terms"]
@@ -319,29 +318,38 @@ def main():
     for order in s_orders:
         hybrid_target += raw_weights[order] * mean_component(order)
 
-    v_list = []
-    for _ in tqdm(range(trials), desc="single step trials"):
-        order = int(rng.choice(s_orders, p=p_order))
-        v_list.append(raw_total * sample_component(order))
-    v_avg = sum(v_list) / trials
-
-    evo_list = []
-    for _ in tqdm(range(trials), desc="multi step trials"):
-        evo = np.eye(2**n, dtype=complex)
-        for _ in range(r):
+    def NCC_sampling(num_trials):
+        v_list = []
+        for _ in tqdm(range(num_trials), desc="single step trials"):
             order = int(rng.choice(s_orders, p=p_order))
-            evo = (raw_total * sample_component(order)) @ s1 @ evo
-        evo_list.append(evo)
-    evo_avg = sum(evo_list) / trials
-    single_after = np.linalg.norm(v_avg - hybrid_target, 2)
-    total_after = np.linalg.norm(evo_avg - np.linalg.matrix_power(hybrid_target @ s1, r), 2)
+            v_list.append(raw_total * sample_component(order))
+        v_average = sum(v_list) / num_trials
+        return v_list, v_average
 
-    single_before = np.linalg.norm(s1 - expm(-1j * (a_mat + b_mat) * t), 2)
-    total_before = np.linalg.norm(np.linalg.matrix_power(s1, r) - u_exact, 2)
-    print("single error before:", single_before)
-    print("single error after:", single_after)
-    print("total error before:", total_before)
-    print("total error after:", total_after)
+    single_step_error_before = np.linalg.norm(s1 - expm(-1j * (a_mat + b_mat) * t), 2)
+    print("single error before:", single_step_error_before)
+
+    v_list, v_avg = NCC_sampling(trials)
+    single_step_error_after = np.linalg.norm(v_avg - hybrid_target, 2)
+    print("single error after:", single_step_error_after)
+
+    def multi_step_NCC_sampling(num_trials):
+        evo_list = []
+        for _ in tqdm(range(num_trials), desc="multi step trials"):
+            evo = np.eye(2**n, dtype=complex)
+            for _ in range(r):
+                order = int(rng.choice(s_orders, p=p_order))
+                evo = (raw_total * sample_component(order)) @ s1 @ evo
+            evo_list.append(evo)
+        evo_average = sum(evo_list) / num_trials
+        return evo_list, evo_average
+
+    total_error_before = np.linalg.norm(np.linalg.matrix_power(s1, r) - u_exact, 2)
+    print("total error before:", total_error_before)
+
+    evo_list, evo_avg = multi_step_NCC_sampling(trials)
+    total_error_after = np.linalg.norm(evo_avg - np.linalg.matrix_power(hybrid_target @ s1, r), 2)
+    print("total error after:", total_error_after)
     print("hybrid target vs V_exact:", np.linalg.norm(hybrid_target - v_exact, 2))
 
     data_dir = Path("data")
@@ -359,10 +367,10 @@ def main():
         phi_orders=np.array(s_orders, dtype=int),
         phi_matrices=np.stack([phi_terms[s] for s in s_orders]),
         tilde_f_matrices=np.stack([tilde_f_terms[s] for s in s_orders]),
-        single_step_error_before=single_before,
-        single_step_error_after=single_after,
-        total_error_before=total_before,
-        total_error_after=total_after,
+        single_step_error_before=single_step_error_before,
+        single_step_error_after=single_step_error_after,
+        total_error_before=total_error_before,
+        total_error_after=total_error_after,
         N=n,
         J=j,
         h=h,
