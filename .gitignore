@@ -19,3 +19,4 @@ __pycache__/
 archive/
 data_local_unitary_list/
 notebook/
+/*.sh
