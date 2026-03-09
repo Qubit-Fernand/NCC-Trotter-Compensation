@@ -1,4 +1,5 @@
 import argparse
+import itertools
 import math
 from pathlib import Path
 
@@ -79,8 +80,8 @@ def build_periodic_ab(n, j, h):
     return a_mat, b_mat
 
 
-def phi_term(a_mat, b_mat, q_max, base_step=None):
-    """Extract Phi_q matrices from log(V(x)) = sum_{q>=2} Phi_q x^q near x=0."""
+def phi_term_log_fit(a_mat, b_mat, q_max, base_step=None):
+    """Archived numeric extractor: fit Phi_q from log(V(x)) near x=0."""
 
     def bch_remainder(a_mat, b_mat, x):
         return expm(-1j * (a_mat + b_mat) * x) @ expm(1j * a_mat * x) @ expm(1j * b_mat * x)
@@ -116,6 +117,47 @@ def phi_term(a_mat, b_mat, q_max, base_step=None):
         coeffs = np.linalg.solve(vand, np.asarray(samples))
         phi_terms[q] = coeffs[0].reshape(dim, dim)
     return phi_terms, base_step
+
+
+def phi_term(a_mat, b_mat, q_max):
+    """Compute Phi_q directly from the BCH commutator formula in the PDF."""
+
+    def compositions(total, parts):
+        if parts == 1:
+            yield (total,)
+            return
+        for first in range(total + 1):
+            for rest in compositions(total - first, parts - 1):
+                yield (first,) + rest
+
+    def descents(perm):
+        return sum(perm[i] > perm[i + 1] for i in range(len(perm) - 1))
+
+    def right_nested_commutator(ops):
+        out = ops[-1]
+        for op in reversed(ops[:-1]):
+            out = commutator(op, out)
+        return out
+
+    x_ops = [1j * b_mat, 1j * a_mat, -1j * (a_mat + b_mat)]  # X1, X2, X3
+    dim = a_mat.shape[0]
+    phi_terms = {}
+    for q in range(2, q_max + 1):
+        total = np.zeros((dim, dim), dtype=complex)
+        perm_data = []
+        for perm in itertools.permutations(range(q)):
+            d_sigma = descents(perm)
+            coeff = ((-1.0) ** d_sigma) / (q**2 * math.comb(q - 1, d_sigma))
+            perm_data.append((perm, coeff))
+
+        for p1, p2, p3 in compositions(q, 3):
+            prefactor = 1.0 / (math.factorial(p1) * math.factorial(p2) * math.factorial(p3))
+            base_seq = [x_ops[2]] * p3 + [x_ops[1]] * p2 + [x_ops[0]] * p1
+            for perm, coeff in perm_data:
+                reordered = [base_seq[idx] for idx in perm]
+                total += prefactor * coeff * right_nested_commutator(reordered)
+        phi_terms[q] = total
+    return phi_terms, None
 
 
 def tilde_F_term(phi_terms, k_order, q0, s0):
@@ -221,9 +263,9 @@ def main():
     print("Lemma 5 condition e*lambda_comm*t <= 1:", cond_finite_s_truncation)
 
     basis = pauli_basis(n)
-    phi_terms, phi_fit_step = phi_term(a_mat, b_mat, s0, base_step=min(t, 0.02))
+    phi_terms, phi_fit_step = phi_term(a_mat, b_mat, s0)
     tilde_f_terms = tilde_F_term(phi_terms, kappa, s0, s0)
-    print("Phi extraction base step:", phi_fit_step)
+    print("Phi extraction method:", "direct BCH commutator formula")
 
     order_data = {}
     eta = {}
