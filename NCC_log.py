@@ -218,7 +218,7 @@ def pauli_decomposition(mat, basis, antihermitian=False, tol=1e-10):
 
 
 @lru_cache(maxsize=None)
-def build_log_static_data(n, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
+def build_static_data(n, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
     """Precompute r-independent data for log-NCC evaluation."""
     if s0 is None:
         s0 = max(3, int(np.ceil(np.log(4 / epsilon))))
@@ -283,14 +283,14 @@ def build_log_static_data(n, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
     }
 
 
-def build_log_tilde_v(n, t_total, r, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
+def build_tilde_v(static, t_total, r):
     """Build the compensated single-step expectation operator tilde_V."""
-    static = build_log_static_data(n, epsilon, j=j, h=h, kappa=kappa, s0=s0)
     a_mat = static["a_mat"]
     b_mat = static["b_mat"]
     identity = static["identity"]
     s_orders = static["s_orders"]
     F_terms = static["F_terms"]
+    kappa = static["kappa"]
 
     t = t_total / r
     s1 = expm(-1j * b_mat * t) @ expm(-1j * a_mat * t)
@@ -299,11 +299,14 @@ def build_log_tilde_v(n, t_total, r, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
     eta = {order: F_terms[order]["l1_norm"] * (t**order) for order in s_orders}
     leading_orders = [s for s in s_orders if s <= 2 * kappa + 1]
     tail_orders = [s for s in s_orders if s > 2 * kappa + 1]
+    # eta_sum = eta_2 + eta_3
     eta_pair_sum = sum(eta[s] for s in leading_orders)
+    # sqrt(1 + eta_sum^2) is the normalization factor for the pair compensation term, which is the dominant contribution to tilde_V when eta_sum is large.
+    pair_scale = math.sqrt(1.0 + eta_pair_sum**2)
     raw_weights = {}
     if eta_pair_sum > 0:
         for s in leading_orders:
-            raw_weights[s] = eta[s] / eta_pair_sum
+            raw_weights[s] = pair_scale * eta[s] / eta_pair_sum
     for s in tail_orders:
         raw_weights[s] = eta[s]
 
@@ -316,7 +319,7 @@ def build_log_tilde_v(n, t_total, r, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
             if F_term["kind"] == "pair":
                 phase = coeff / (1j * abs(coeff))
                 w_mat = phase * pauli
-                tilde_v += weight * prob * (identity + 1j * eta_pair_sum * w_mat)
+                tilde_v += weight * prob * ((identity + 1j * eta_pair_sum * w_mat) / pair_scale)
             else:
                 tilde_v += weight * prob * (coeff / abs(coeff) * pauli)
 
@@ -326,14 +329,16 @@ def build_log_tilde_v(n, t_total, r, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
         "u_exact": u_exact,
         "eta": eta,
         "eta_pair_sum": eta_pair_sum,
+        "pair_scale": pair_scale,
         "raw_weights": raw_weights,
     }
 
 
 @lru_cache(maxsize=None)
-def exact_log_total_error(n, t_total, r, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
+def build_deterministic_bias(n, t_total, r, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
     """Return ||(tilde_V S_1)^r - U_exact||_2 for the deterministic expectation operator."""
-    data = build_log_tilde_v(n, t_total, r, epsilon, j=j, h=h, kappa=kappa, s0=s0)
+    static = build_static_data(n, epsilon, j=j, h=h, kappa=kappa, s0=s0)
+    data = build_tilde_v(static, t_total, r)
     return np.linalg.norm(np.linalg.matrix_power(data["tilde_v"] @ data["s1"], r) - data["u_exact"], 2)
 
 
@@ -367,8 +372,8 @@ def main():
     print("Lemma 3 condition 8e(a_max*kappa+1)q0kg t <= 1:", cond_bch_truncation)
     print("Lemma 5 condition e*lambda_comm*t <= 1:", cond_finite_s_truncation)
 
-    static = build_log_static_data(n, epsilon, j=j, h=h, kappa=kappa, s0=s0)
-    step_data = build_log_tilde_v(n, t_total, r, epsilon, j=j, h=h, kappa=kappa, s0=s0)
+    static = build_static_data(n, epsilon, j=j, h=h, kappa=kappa, s0=s0)
+    step_data = build_tilde_v(static, t_total, r)
     a_mat = static["a_mat"]
     b_mat = static["b_mat"]
     phi_terms = static["phi_terms"]
@@ -414,33 +419,18 @@ def main():
             hermitian_err = np.linalg.norm(w_mat - w_mat.conj().T, ord="fro")
             if hermitian_err > atol:
                 raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
-            return static["identity"] + 1j * eta_pair_sum * w_mat
+            return (static["identity"] + 1j * eta_pair_sum * w_mat) / step_data["pair_scale"]
         return coeff / abs(coeff) * pauli
 
-    def tilde_V():
-        tilde_v_local = np.zeros((2**n, 2**n), dtype=complex)
-        for order in s_orders:
-            F_term = F_terms[order]
-            probs = np.abs(F_term["coeffs"]) / F_term["l1_norm"]
-            for prob, coeff, pauli in zip(probs, F_term["coeffs"], F_term["terms"]):
-                if F_term["kind"] == "pair":
-                    phase = coeff / (1j * abs(coeff))
-                    w_mat = phase * pauli
-                    tilde_v_local += raw_weights[order] * prob * (static["identity"] + 1j * eta_pair_sum * w_mat)
-                else:
-                    tilde_v_local += raw_weights[order] * prob * (coeff / abs(coeff) * pauli)
-        return tilde_v_local
-
     def tilde_V_taylor():
+        """The cache use probability to calculate expectation, here we directly calculate tilde_V as expectation."""
         tilde_v = np.eye(2**n, dtype=complex)
         for order in s_orders:
             tilde_v += tilde_f_terms[order] * (t**order)
         return tilde_v
 
-    tilde_v_check = tilde_V()
     tilde_v_taylor = tilde_V_taylor()
     print("tilde_V compensate-vs-Taylor:", np.linalg.norm(tilde_v - tilde_v_taylor, 2))
-    print("tilde_V cached-vs-recomputed:", np.linalg.norm(tilde_v - tilde_v_check, 2))
 
     # Sampling start here
     def NCC_sampling(num_trials):

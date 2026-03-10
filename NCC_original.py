@@ -1,6 +1,6 @@
 """
 We first compute the commutator and then calculate its Pauli 1-norm.
-We use the commutator results' Pauli expansion to pair into exp unlike the pseudocode in prx paper, which use the summands in the commutator to pair.
+We use the commutator results' Pauli expansion to pair into exp, unlike the layer-wise pair in pseudocode in prx paper.
 """
 
 import argparse
@@ -154,6 +154,7 @@ def main():
         S_r = S @ S_r
 
     evolution_exact = expm(-1j * (A + B) * t * r)
+    identity = np.eye(2**N, dtype=complex)
 
     def sample_Pauli_then_compensate_exp(rng, s, atol=1e-10):
         """Sample a Hermitian Pauli W from order-s commutator data"""
@@ -175,7 +176,7 @@ def main():
 
         # aim to apply exp(i theta W) * \sqrt{1+eta_sum^2}.
         # numerically we equivalently apply the term before pairing
-        return I + 1j * eta_sum * w_mat
+        return identity + 1j * eta_sum * w_mat
 
     def tilde_V():
         """Expectation of single-step compensation unitary"""
@@ -186,7 +187,7 @@ def main():
             for p_pauli, coeff, pauli in zip(probs, F_term["coeffs"], F_term["terms"]):
                 sign = coeff / (1j * abs(coeff))
                 w_mat = sign * pauli
-                tilde_v += p_order * p_pauli * (I + 1j * eta_sum * w_mat)
+                tilde_v += p_order * p_pauli * (identity + 1j * eta_sum * w_mat)
         return tilde_v
 
     # K = 1, sample from s = 2, 3

@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from NCC_log import build_log_static_data, build_log_tilde_v, exact_log_total_error
+from NCC_log import build_static_data, build_tilde_v, build_deterministic_bias
 
 
 def build_parser():
@@ -102,12 +102,13 @@ def save_sampling_checkpoint(out_base: Path, payload: dict):
         eval_sample_fluctuation=np.array([item["sample_fluctuation"] for item in payload["evaluations"]], dtype=float),
     )
 
-def sample_component(
+def sample_Pauli_then_compensate_exp(
     rng: np.random.Generator,
     identity: np.ndarray,
     f_terms: dict,
     order: int,
     eta_pair_sum: float,
+    pair_scale: float,
     atol: float = 1e-10,
 ):
     data = f_terms[order]
@@ -121,7 +122,7 @@ def sample_component(
         hermitian_err = np.linalg.norm(w_mat - w_mat.conj().T, ord="fro")
         if hermitian_err > atol:
             raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
-        return identity + 1j * eta_pair_sum * w_mat
+        return (identity + 1j * eta_pair_sum * w_mat) / pair_scale
     return coeff / abs(coeff) * pauli
 
 
@@ -137,8 +138,8 @@ def estimate_total_sample_error(
     s0: int,
 ):
     kappa = 1
-    static = build_log_static_data(n, epsilon, j=j, h=h, kappa=kappa, s0=s0 or None)
-    step_data = build_log_tilde_v(n, t_total, r, epsilon, j=j, h=h, kappa=kappa, s0=s0 or None)
+    static = build_static_data(n, epsilon, j=j, h=h, kappa=kappa, s0=s0 or None)
+    step_data = build_tilde_v(static, t_total, r)
     s_orders = static["s_orders"]
     f_terms = static["F_terms"]
     identity = static["identity"]
@@ -152,7 +153,17 @@ def estimate_total_sample_error(
         evo = identity.copy()
         for _ in range(r):
             order = int(rng.choice(s_orders, p=p_order))
-            evo = (raw_total * sample_component(rng, identity, f_terms, order, step_data["eta_pair_sum"])) @ step_data["s1"] @ evo
+            evo = (
+                raw_total
+                * sample_Pauli_then_compensate_exp(
+                    rng,
+                    identity,
+                    f_terms,
+                    order,
+                    step_data["eta_pair_sum"],
+                    step_data["pair_scale"],
+                )
+            ) @ step_data["s1"] @ evo
         evo_average += evo
     evo_average /= trials
 
@@ -163,19 +174,20 @@ def estimate_total_sample_error(
         "expectation_bias": float(np.linalg.norm(deterministic - step_data["u_exact"], 2)),
         "theta_pair": float("nan"),
         "eta_pair_sum": float(step_data["eta_pair_sum"]),
+        "pair_scale": float(step_data["pair_scale"]),
         "raw_total": raw_total,
     }
 
 
-def find_min_segments_log(n, t_total, epsilon, j=1.0, h=1.0, r_max=512, kappa=1, s0=None):
+def find_min_segments(n, t_total, epsilon, j=1.0, h=1.0, r_max=512, kappa=1, s0=None):
     """Binary search the smallest r with deterministic log-NCC error <= epsilon."""
     low = 1
     high = 1
-    err_high = exact_log_total_error(n, t_total, high, epsilon, j=j, h=h, kappa=kappa, s0=s0)
+    err_high = build_deterministic_bias(n, t_total, high, epsilon, j=j, h=h, kappa=kappa, s0=s0)
     while err_high > epsilon and high < r_max:
         low = high
         high *= 2
-        err_high = exact_log_total_error(
+        err_high = build_deterministic_bias(
             n,
             t_total,
             high,
@@ -190,7 +202,7 @@ def find_min_segments_log(n, t_total, epsilon, j=1.0, h=1.0, r_max=512, kappa=1,
 
     while low + 1 < high:
         mid = (low + high) // 2
-        err_mid = exact_log_total_error(n, t_total, mid, epsilon, j=j, h=h, kappa=kappa, s0=s0)
+        err_mid = build_deterministic_bias(n, t_total, mid, epsilon, j=j, h=h, kappa=kappa, s0=s0)
         if err_mid <= epsilon:
             high = mid
             err_high = err_mid
@@ -307,7 +319,7 @@ def main(argv=None):
         "evaluations": [],
     }
 
-    build_log_static_data(args.N, args.epsilon, j=args.J, h=args.h, kappa=1, s0=actual_s0)
+    build_static_data(args.N, args.epsilon, j=args.J, h=args.h, kappa=1, s0=actual_s0)
 
     def checkpoint():
         save_sampling_checkpoint(out_base, payload)

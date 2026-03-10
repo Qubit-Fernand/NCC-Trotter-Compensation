@@ -20,4 +20,4 @@ archive/
 data_local_unitary_list/
 notebook/
 data_Ising/
-/*.sh
+# /*.sh
