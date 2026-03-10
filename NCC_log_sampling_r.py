@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from NCC_log import build_log_static_data, build_log_tilde_v
+from NCC_log import build_log_static_data, build_log_tilde_v, exact_log_total_error
 
 
 def build_parser():
@@ -30,11 +30,6 @@ def build_parser():
 
 def parse_args(argv=None):
     return build_parser().parse_args(argv)
-
-
-def pauli_rotation(pauli: np.ndarray, phase: complex, angle: float, identity: np.ndarray) -> np.ndarray:
-    signed_pauli = phase * pauli
-    return np.cos(angle) * identity + 1j * np.sin(angle) * signed_pauli
 
 
 def make_eval_seed(base_seed: int, repetition: int, r: int) -> int:
@@ -110,16 +105,24 @@ def save_sampling_checkpoint(out_base: Path, payload: dict):
 def sample_component(
     rng: np.random.Generator,
     identity: np.ndarray,
-    order_data: dict,
+    f_terms: dict,
     order: int,
-    theta_pair: float,
+    eta_pair_sum: float,
+    atol: float = 1e-10,
 ):
-    data = order_data[order]
-    idx = int(rng.choice(len(data["terms"]), p=data["probs"]))
-    phase, pauli = data["terms"][idx]
+    data = f_terms[order]
+    probs = np.abs(data["coeffs"]) / data["l1_norm"]
+    idx = int(rng.choice(len(data["terms"]), p=probs))
+    coeff = data["coeffs"][idx]
+    pauli = data["terms"][idx]
     if data["kind"] == "pair":
-        return pauli_rotation(pauli, phase, theta_pair, identity)
-    return phase * pauli
+        phase = coeff / (1j * abs(coeff))
+        w_mat = phase * pauli
+        hermitian_err = np.linalg.norm(w_mat - w_mat.conj().T, ord="fro")
+        if hermitian_err > atol:
+            raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
+        return identity + 1j * eta_pair_sum * w_mat
+    return coeff / abs(coeff) * pauli
 
 
 def estimate_total_sample_error(
@@ -137,7 +140,7 @@ def estimate_total_sample_error(
     static = build_log_static_data(n, epsilon, j=j, h=h, kappa=kappa, s0=s0 or None)
     step_data = build_log_tilde_v(n, t_total, r, epsilon, j=j, h=h, kappa=kappa, s0=s0 or None)
     s_orders = static["s_orders"]
-    order_data = static["order_data"]
+    f_terms = static["F_terms"]
     identity = static["identity"]
     raw_weights = step_data["raw_weights"]
     raw_total = float(sum(raw_weights.values()))
@@ -149,7 +152,7 @@ def estimate_total_sample_error(
         evo = identity.copy()
         for _ in range(r):
             order = int(rng.choice(s_orders, p=p_order))
-            evo = (raw_total * sample_component(rng, identity, order_data, order, step_data["theta_pair"])) @ step_data["s1"] @ evo
+            evo = (raw_total * sample_component(rng, identity, f_terms, order, step_data["eta_pair_sum"])) @ step_data["s1"] @ evo
         evo_average += evo
     evo_average /= trials
 
@@ -158,10 +161,42 @@ def estimate_total_sample_error(
         "sample_error": float(np.linalg.norm(evo_average - step_data["u_exact"], 2)),
         "sample_fluctuation": float(np.linalg.norm(evo_average - deterministic, 2)),
         "expectation_bias": float(np.linalg.norm(deterministic - step_data["u_exact"], 2)),
-        "theta_pair": float(step_data["theta_pair"]),
+        "theta_pair": float("nan"),
         "eta_pair_sum": float(step_data["eta_pair_sum"]),
         "raw_total": raw_total,
     }
+
+
+def find_min_segments_log(n, t_total, epsilon, j=1.0, h=1.0, r_max=512, kappa=1, s0=None):
+    """Binary search the smallest r with deterministic log-NCC error <= epsilon."""
+    low = 1
+    high = 1
+    err_high = exact_log_total_error(n, t_total, high, epsilon, j=j, h=h, kappa=kappa, s0=s0)
+    while err_high > epsilon and high < r_max:
+        low = high
+        high *= 2
+        err_high = exact_log_total_error(
+            n,
+            t_total,
+            high,
+            epsilon,
+            j=j,
+            h=h,
+            kappa=kappa,
+            s0=s0,
+        )
+    if err_high > epsilon:
+        raise RuntimeError(f"failed to reach epsilon={epsilon} by r={r_max}")
+
+    while low + 1 < high:
+        mid = (low + high) // 2
+        err_mid = exact_log_total_error(n, t_total, mid, epsilon, j=j, h=h, kappa=kappa, s0=s0)
+        if err_mid <= epsilon:
+            high = mid
+            err_high = err_mid
+        else:
+            low = mid
+    return high, err_high
 
 
 def find_r_min_sampling(
@@ -251,6 +286,7 @@ def main(argv=None):
             "N": args.N,
             "J": args.J,
             "h": args.h,
+            "Heisenberg": True,
             "T": args.T,
             "epsilon": args.epsilon,
             "trials": args.trials,

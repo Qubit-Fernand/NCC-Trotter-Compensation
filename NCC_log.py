@@ -50,15 +50,15 @@ def pauli_basis(n):
 
 
 def build_periodic_ab(n, j, h):
-    """Build A and B matrices for the Hamiltonian H = sum_{i} j X_i X_{i+1} + h Z_i with periodic boundary condition."""
+    """Build A and B matrices for the periodic Heisenberg Hamiltonian."""
 
-    def xx_term(index):
+    def two_local_term(index, pauli):
         if index < n - 1:
             return j * np.kron(
                 np.eye(2**index, dtype=complex),
-                np.kron(np.kron(X, X), np.eye(2 ** (n - index - 2), dtype=complex)),
+                np.kron(np.kron(pauli, pauli), np.eye(2 ** (n - index - 2), dtype=complex)),
             )
-        return j * np.kron(X, np.kron(np.eye(2 ** (n - 2), dtype=complex), X))
+        return j * np.kron(pauli, np.kron(np.eye(2 ** (n - 2), dtype=complex), pauli))
 
     def z_term(index):
         return h * np.kron(
@@ -69,9 +69,9 @@ def build_periodic_ab(n, j, h):
     a_mat = np.zeros((2**n, 2**n), dtype=complex)
     b_mat = np.zeros((2**n, 2**n), dtype=complex)
     for idx in range(0, n, 2):
-        a_mat += xx_term(idx) + z_term(idx)
+        a_mat += two_local_term(idx, X) + two_local_term(idx, Y) + two_local_term(idx, Z) + z_term(idx)
     for idx in range(1, n, 2):
-        b_mat += xx_term(idx) + z_term(idx)
+        b_mat += two_local_term(idx, X) + two_local_term(idx, Y) + two_local_term(idx, Z) + z_term(idx)
     return a_mat, b_mat
 
 
@@ -195,40 +195,26 @@ def pauli_decomposition(mat, basis, antihermitian=False, tol=1e-10):
     """Decompose mat in the Pauli basis."""
     n = int(round(math.log2(mat.shape[0])))
     scale = 2**n
+    coeffs = []
     terms = []
-    abs_weights = []
     for p in basis:
         coeff = np.trace(p.conj().T @ mat) / scale
         if antihermitian:
-            a = -1j * coeff
-            if abs(a) <= tol:
+            if abs(coeff) <= tol:
                 continue
-            if abs(np.imag(a)) > 1e-7:
-                raise ValueError("decomposition coefficient has non-negligible imaginary part")
-            a_real = float(np.real(a))
-            if abs(a_real) <= tol:
-                continue
-            terms.append((1.0 if a_real > 0 else -1.0, p))
-            abs_weights.append(abs(a_real))
+            if abs(np.real(coeff)) > 1e-7:
+                raise ValueError("anti-Hermitian Pauli decomposition has non-negligible real Pauli coefficient")
         else:
             if abs(coeff) <= tol:
                 continue
-            coeff_abs = abs(coeff)
-            terms.append((coeff / coeff_abs, p))
-            abs_weights.append(coeff_abs)
-    if not abs_weights:
+        coeffs.append(coeff)
+        terms.append(p)
+    coeffs = np.array(coeffs, dtype=complex)
+    l1_norm = float(np.sum(np.abs(coeffs)))
+    if l1_norm <= 0:
         kind = "anti-Hermitian Pauli" if antihermitian else "Pauli"
         raise ValueError(f"empty {kind} decomposition")
-    abs_weights = np.array(abs_weights, dtype=float)
-    probs_weighted = abs_weights / np.sum(abs_weights)
-    l1_norm = float(np.sum(abs_weights))
-    return terms, probs_weighted, l1_norm
-
-
-def pauli_rotation(pauli, phase, angle, identity):
-    """Closed-form exp(i angle * phase * P) for a Hermitian Pauli P."""
-    signed_pauli = phase * pauli
-    return np.cos(angle) * identity + 1j * np.sin(angle) * signed_pauli
+    return coeffs, terms, l1_norm
 
 
 @lru_cache(maxsize=None)
@@ -245,7 +231,7 @@ def build_log_static_data(n, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
     tilde_f_terms = tilde_F_term(phi_terms, kappa, s0, s0)
     identity = np.eye(2**n, dtype=complex)
 
-    order_data = {}
+    F_terms = {}
     phi_l1 = {}
     tilde_f_l1 = {}
     pairable_orders = []
@@ -255,9 +241,8 @@ def build_log_static_data(n, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
         _, _, phi_q_l1 = pauli_decomposition(phi_q, basis, antihermitian=True)
         phi_l1[order] = phi_q_l1
 
-        terms, weighted_probs, l1_norm = pauli_decomposition(tilde_f_terms[order], basis)
-        probs = weighted_probs
-        order_data[order] = {"kind": "tail", "terms": terms, "probs": probs, "l1_norm": l1_norm}
+        coeffs, terms, l1_norm = pauli_decomposition(tilde_f_terms[order], basis)
+        F_terms[order] = {"kind": "tail", "coeffs": coeffs, "terms": terms, "l1_norm": l1_norm}
         tilde_f_l1[order] = l1_norm
 
         antiherm_err = np.linalg.norm(
@@ -265,16 +250,16 @@ def build_log_static_data(n, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
             ord="fro",
         )
         if antiherm_err <= 1e-8:
-            pair_terms, pair_probs, _ = pauli_decomposition(
+            pair_coeffs, pair_terms, _ = pauli_decomposition(
                 tilde_f_terms[order],
                 basis,
                 antihermitian=True,
             )
             pairable_orders.append(order)
-            order_data[order] = {
+            F_terms[order] = {
                 "kind": "pair",
+                "coeffs": pair_coeffs,
                 "terms": pair_terms,
-                "probs": pair_probs,
                 "l1_norm": l1_norm,
             }
         else:
@@ -289,7 +274,7 @@ def build_log_static_data(n, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
         "tilde_f_terms": tilde_f_terms,
         "phi_l1": phi_l1,
         "tilde_f_l1": tilde_f_l1,
-        "order_data": order_data,
+        "F_terms": F_terms,
         "s_orders": list(range(kappa + 1, s0 + 1)),
         "pairable_orders": pairable_orders,
         "non_pairable_orders": non_pairable_orders,
@@ -305,18 +290,16 @@ def build_log_tilde_v(n, t_total, r, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
     b_mat = static["b_mat"]
     identity = static["identity"]
     s_orders = static["s_orders"]
-    order_data = static["order_data"]
+    F_terms = static["F_terms"]
 
     t = t_total / r
     s1 = expm(-1j * b_mat * t) @ expm(-1j * a_mat * t)
     u_exact = expm(-1j * (a_mat + b_mat) * t_total)
 
-    eta = {order: order_data[order]["l1_norm"] * (t**order) for order in s_orders}
+    eta = {order: F_terms[order]["l1_norm"] * (t**order) for order in s_orders}
     leading_orders = [s for s in s_orders if s <= 2 * kappa + 1]
     tail_orders = [s for s in s_orders if s > 2 * kappa + 1]
     eta_pair_sum = sum(eta[s] for s in leading_orders)
-    theta_pair = np.arctan(eta_pair_sum)
-
     raw_weights = {}
     if eta_pair_sum > 0:
         for s in leading_orders:
@@ -326,13 +309,16 @@ def build_log_tilde_v(n, t_total, r, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
 
     tilde_v = np.zeros_like(identity)
     for order in s_orders:
-        data = order_data[order]
+        F_term = F_terms[order]
         weight = raw_weights[order]
-        for prob, (phase, pauli) in zip(data["probs"], data["terms"]):
-            if data["kind"] == "pair":
-                tilde_v += weight * prob * pauli_rotation(pauli, phase, theta_pair, identity)
+        probs = np.abs(F_term["coeffs"]) / F_term["l1_norm"]
+        for prob, coeff, pauli in zip(probs, F_term["coeffs"], F_term["terms"]):
+            if F_term["kind"] == "pair":
+                phase = coeff / (1j * abs(coeff))
+                w_mat = phase * pauli
+                tilde_v += weight * prob * (identity + 1j * eta_pair_sum * w_mat)
             else:
-                tilde_v += weight * prob * (phase * pauli)
+                tilde_v += weight * prob * (coeff / abs(coeff) * pauli)
 
     return {
         "tilde_v": tilde_v,
@@ -340,7 +326,6 @@ def build_log_tilde_v(n, t_total, r, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
         "u_exact": u_exact,
         "eta": eta,
         "eta_pair_sum": eta_pair_sum,
-        "theta_pair": theta_pair,
         "raw_weights": raw_weights,
     }
 
@@ -350,38 +335,6 @@ def exact_log_total_error(n, t_total, r, epsilon, j=1.0, h=1.0, kappa=1, s0=None
     """Return ||(tilde_V S_1)^r - U_exact||_2 for the deterministic expectation operator."""
     data = build_log_tilde_v(n, t_total, r, epsilon, j=j, h=h, kappa=kappa, s0=s0)
     return np.linalg.norm(np.linalg.matrix_power(data["tilde_v"] @ data["s1"], r) - data["u_exact"], 2)
-
-
-def find_min_segments_log(n, t_total, epsilon, j=1.0, h=1.0, r_max=512, kappa=1, s0=None):
-    """Binary search the smallest r with deterministic log-NCC error <= epsilon."""
-    low = 1
-    high = 1
-    err_high = exact_log_total_error(n, t_total, high, epsilon, j=j, h=h, kappa=kappa, s0=s0)
-    while err_high > epsilon and high < r_max:
-        low = high
-        high *= 2
-        err_high = exact_log_total_error(
-            n,
-            t_total,
-            high,
-            epsilon,
-            j=j,
-            h=h,
-            kappa=kappa,
-            s0=s0,
-        )
-    if err_high > epsilon:
-        raise RuntimeError(f"failed to reach epsilon={epsilon} by r={r_max}")
-
-    while low + 1 < high:
-        mid = (low + high) // 2
-        err_mid = exact_log_total_error(n, t_total, mid, epsilon, j=j, h=h, kappa=kappa, s0=s0)
-        if err_mid <= epsilon:
-            high = mid
-            err_high = err_mid
-        else:
-            low = mid
-    return high, err_high
 
 
 def main():
@@ -422,7 +375,7 @@ def main():
     tilde_f_terms = static["tilde_f_terms"]
     phi_l1 = static["phi_l1"]
     tilde_f_l1 = static["tilde_f_l1"]
-    order_data = static["order_data"]
+    F_terms = static["F_terms"]
     s_orders = static["s_orders"]
     pairable_orders = static["pairable_orders"]
     non_pairable_orders = static["non_pairable_orders"]
@@ -431,13 +384,12 @@ def main():
     u_exact = step_data["u_exact"]
     eta = step_data["eta"]
     eta_pair_sum = step_data["eta_pair_sum"]
-    theta_pair = step_data["theta_pair"]
     raw_weights = step_data["raw_weights"]
     v_exact = expm(-1j * (a_mat + b_mat) * t) @ expm(1j * a_mat * t) @ expm(1j * b_mat * t)
     print("Phi extraction method:", "direct BCH commutator formula")
     raw_total = float(sum(raw_weights.values()))
     p_order = np.array([raw_weights[s] / raw_total for s in s_orders], dtype=float)
-    print("eta_pair_sum:", eta_pair_sum, "theta_pair:", theta_pair)
+    print("eta_pair_sum:", eta_pair_sum)
     print("eta by order:", {s: eta[s] for s in s_orders})
     print("Phi_q l1:", {s: phi_l1[s] for s in s_orders})
     print("tilde_F Pauli-l1:", {s: tilde_f_l1[s] for s in s_orders})
@@ -448,34 +400,35 @@ def main():
 
     rng = np.random.default_rng(seed=7)
 
-    def compensation_unitary(w_mat, angle, atol=1e-10):
-        """Build compensation unitary exp(i angle W) for Hermitian Pauli W."""
-        hermitian_err = np.linalg.norm(w_mat - w_mat.conj().T, ord="fro")
-        if hermitian_err > atol:
-            raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
-        return pauli_rotation(w_mat, 1.0, angle, static["identity"])
-
-    def sample_component(order):
-        data = order_data[order]
-        terms = data["terms"]
-        probs = data["probs"]
+    def sample_Pauli_then_compensate_exp(order, atol=1e-10):
+        """Sample one component from F_terms and keep the pre-pairing linear form."""
+        F_term = F_terms[order]
+        terms = F_term["terms"]
+        probs = np.abs(F_term["coeffs"]) / F_term["l1_norm"]
         idx = int(rng.choice(len(terms), p=probs))
-        phase, pauli = terms[idx]
-        if data["kind"] == "pair":
-            return compensation_unitary(phase * pauli, theta_pair)
-        return phase * pauli
-
-    """The expectatiion value of the sampled component, two ways to compute"""
+        coeff = F_term["coeffs"][idx]
+        pauli = terms[idx]
+        if F_term["kind"] == "pair":
+            phase = coeff / (1j * abs(coeff))
+            w_mat = phase * pauli
+            hermitian_err = np.linalg.norm(w_mat - w_mat.conj().T, ord="fro")
+            if hermitian_err > atol:
+                raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
+            return static["identity"] + 1j * eta_pair_sum * w_mat
+        return coeff / abs(coeff) * pauli
 
     def tilde_V():
         tilde_v_local = np.zeros((2**n, 2**n), dtype=complex)
         for order in s_orders:
-            data = order_data[order]
-            for prob, (phase, pauli) in zip(data["probs"], data["terms"]):
-                if data["kind"] == "pair":
-                    tilde_v_local += raw_weights[order] * prob * compensation_unitary(phase * pauli, theta_pair)
+            F_term = F_terms[order]
+            probs = np.abs(F_term["coeffs"]) / F_term["l1_norm"]
+            for prob, coeff, pauli in zip(probs, F_term["coeffs"], F_term["terms"]):
+                if F_term["kind"] == "pair":
+                    phase = coeff / (1j * abs(coeff))
+                    w_mat = phase * pauli
+                    tilde_v_local += raw_weights[order] * prob * (static["identity"] + 1j * eta_pair_sum * w_mat)
                 else:
-                    tilde_v_local += raw_weights[order] * prob * (phase * pauli)
+                    tilde_v_local += raw_weights[order] * prob * (coeff / abs(coeff) * pauli)
         return tilde_v_local
 
     def tilde_V_taylor():
@@ -494,7 +447,7 @@ def main():
         v_list = []
         for _ in tqdm(range(num_trials), desc="single step trials"):
             order = int(rng.choice(s_orders, p=p_order))
-            v_list.append(raw_total * sample_component(order))
+            v_list.append(raw_total * sample_Pauli_then_compensate_exp(order))
         v_average = sum(v_list) / num_trials
         return v_list, v_average
 
@@ -516,7 +469,7 @@ def main():
             evo = np.eye(2**n, dtype=complex)
             for _ in range(r):
                 order = int(rng.choice(s_orders, p=p_order))
-                evo = (raw_total * sample_component(order)) @ s1 @ evo
+                evo = (raw_total * sample_Pauli_then_compensate_exp(order)) @ s1 @ evo
             evo_list.append(evo)
         evo_average = sum(evo_list) / num_trials
         return evo_list, evo_average
@@ -567,7 +520,7 @@ def main():
         epsilon=epsilon,
         q0=q0,
         s0=s0,
-        theta=theta_pair,
+        theta=np.nan,
         eta_sum=eta_pair_sum,
         raw_total=raw_total,
         sampling="weighted",

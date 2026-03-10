@@ -1,6 +1,6 @@
 """
 We first compute the commutator and then calculate its Pauli 1-norm.
-We use the commutator results to pair into exp unlike the pseudocode in prx paper, which use the summands in the commutator to pair.
+We use the commutator results' Pauli expansion to pair into exp unlike the pseudocode in prx paper, which use the summands in the commutator to pair.
 """
 
 import argparse
@@ -30,7 +30,6 @@ def parse_args():
     parser.add_argument("--h", type=float, default=1.0, help="transverse field strength")
     parser.add_argument("--T", type=float, default=1.0, help="evolution time")
     parser.add_argument("--r", type=int, default=20, help="Trotter steps")
-    # parser.add_argument("--Heisenberg", type=_str2bool, default=True, help="use Heisenberg model (true/false)")
     parser.add_argument("--trials", type=int, default=1000, help="NCC trials")
     return parser.parse_args()
 
@@ -47,55 +46,29 @@ def pauli_basis(num_qubits):
     return basis
 
 
-def build_periodic_ab(num_qubits, coupling_j, field_h, heisenberg=False):
-    def xx_term(index):
-        if index < num_qubits - 1:
-            return coupling_j * np.kron(
-                np.eye(2**index),
-                np.kron(np.kron(X, X), np.eye(2 ** (num_qubits - index - 2))),
-            )
-        if index == num_qubits - 1:
-            return np.kron(X, np.kron(np.eye(2 ** (num_qubits - 2)), X))
-        raise IndexError("out of range")
+def build_periodic_ab(num_qubits, coupling_j, field_h):
+    """Build A and B matrices for the periodic Heisenberg Hamiltonian."""
 
-    def yy_term(index):
-        if not heisenberg:
-            return np.zeros((2**num_qubits, 2**num_qubits), dtype=complex)
+    def two_local_term(index, pauli):
         if index < num_qubits - 1:
             return coupling_j * np.kron(
-                np.eye(2**index),
-                np.kron(np.kron(Y, Y), np.eye(2 ** (num_qubits - index - 2))),
+                np.eye(2**index, dtype=complex),
+                np.kron(np.kron(pauli, pauli), np.eye(2 ** (num_qubits - index - 2), dtype=complex)),
             )
-        if index == num_qubits - 1:
-            return np.kron(Y, np.kron(np.eye(2 ** (num_qubits - 2)), Y))
-        raise IndexError("out of range")
-
-    def zz_term(index):
-        if not heisenberg:
-            return np.zeros((2**num_qubits, 2**num_qubits), dtype=complex)
-        if index < num_qubits - 1:
-            return coupling_j * np.kron(
-                np.eye(2**index),
-                np.kron(np.kron(Z, Z), np.eye(2 ** (num_qubits - index - 2))),
-            )
-        if index == num_qubits - 1:
-            return np.kron(Z, np.kron(np.eye(2 ** (num_qubits - 2)), Z))
-        raise IndexError("out of range")
+        return coupling_j * np.kron(pauli, np.kron(np.eye(2 ** (num_qubits - 2), dtype=complex), pauli))
 
     def z_term(index):
-        if index <= num_qubits - 1:
-            return field_h * np.kron(
-                np.eye(2**index),
-                np.kron(Z, np.eye(2 ** (num_qubits - index - 1))),
-            )
-        raise IndexError("out of range")
+        return field_h * np.kron(
+            np.eye(2**index, dtype=complex),
+            np.kron(Z, np.eye(2 ** (num_qubits - index - 1), dtype=complex)),
+        )
 
     a_mat = np.zeros((2**num_qubits, 2**num_qubits), dtype=complex)
     b_mat = np.zeros((2**num_qubits, 2**num_qubits), dtype=complex)
     for index in range(0, num_qubits, 2):
-        a_mat += xx_term(index) + yy_term(index) + zz_term(index) + z_term(index)
+        a_mat += two_local_term(index, X) + two_local_term(index, Y) + two_local_term(index, Z) + z_term(index)
     for index in range(1, num_qubits, 2):
-        b_mat += xx_term(index) + yy_term(index) + zz_term(index) + z_term(index)
+        b_mat += two_local_term(index, X) + two_local_term(index, Y) + two_local_term(index, Z) + z_term(index)
     return a_mat, b_mat
 
 
@@ -103,34 +76,27 @@ def pauli_decomposition(matrix, basis, antihermitian=False, tol=1e-10):
     """Decompose a matrix in the Pauli basis."""
     num_qubits = int(round(np.log2(matrix.shape[0])))
     scale = 2**num_qubits
+    coeffs = []
     terms = []
-    abs_weights = []
     for P in basis:
         coeff = np.trace(P.conj().T @ matrix) / scale
         if antihermitian:
-            a = -1j * coeff
-            if abs(a) <= tol:
+            if abs(coeff) <= tol:
                 continue
-            if abs(np.imag(a)) > 1e-7:
-                raise ValueError("anti-Hermitian Pauli decomposition has non-negligible imaginary weight")
-            a_real = float(np.real(a))
-            if abs(a_real) <= tol:
-                continue
-            terms.append((1.0 if a_real > 0 else -1.0, P))
-            abs_weights.append(abs(a_real))
+            if abs(np.real(coeff)) > 1e-7:
+                raise ValueError("anti-Hermitian Pauli decomposition has non-negligible real Pauli coefficient")
         else:
             if abs(coeff) <= tol:
                 continue
-            coeff_abs = abs(coeff)
-            terms.append((coeff / coeff_abs, P))
-            abs_weights.append(coeff_abs)
+        coeffs.append(coeff)
+        terms.append(P)
 
-    total_weight = float(sum(abs_weights))
-    if total_weight <= 0:
+    coeffs = np.array(coeffs, dtype=complex)
+    l1_norm = float(np.sum(np.abs(coeffs)))
+    if l1_norm <= 0:
         kind = "anti-Hermitian Pauli" if antihermitian else "Pauli"
         raise ValueError(f"empty {kind} decomposition: zero decomposition weight")
-    probs = np.array(abs_weights, dtype=float) / total_weight
-    return terms, probs, total_weight
+    return coeffs, terms, l1_norm
 
 
 def main():
@@ -142,7 +108,6 @@ def main():
     h = args.h
     T = args.T
     r = args.r
-    Heisenberg = False
 
     g = 2 * (J + h)  # extensive parameter
     k = 2  # 2-local Hamiltonian
@@ -156,7 +121,7 @@ def main():
 
     print("time step:", t)
 
-    A, B = build_periodic_ab(N, J, h, heisenberg=Heisenberg)
+    A, B = build_periodic_ab(N, J, h)
     basis = pauli_basis(N)
 
     # note the order of exp(A) and exp(B)
@@ -165,11 +130,11 @@ def main():
 
     C1 = commutator(B, A)
     C2 = 1j * (2 * commutator(B, commutator(A, B)) + commutator(A, commutator(A, B)))
-    order_data = {}
-    c1_terms, c1_probs, c1_l1 = pauli_decomposition(C1, basis, antihermitian=True)
-    c2_terms, c2_probs, c2_l1 = pauli_decomposition(C2, basis, antihermitian=True)
-    order_data[2] = {"terms": c1_terms, "probs": c1_probs, "l1_norm": c1_l1}
-    order_data[3] = {"terms": c2_terms, "probs": c2_probs, "l1_norm": c2_l1}
+    F_terms = {}
+    c1_coeffs, c1_terms, c1_l1 = pauli_decomposition(C1, basis, antihermitian=True)
+    c2_coeffs, c2_terms, c2_l1 = pauli_decomposition(C2, basis, antihermitian=True)
+    F_terms[2] = {"coeffs": c1_coeffs, "terms": c1_terms, "l1_norm": c1_l1}
+    F_terms[3] = {"coeffs": c2_coeffs, "terms": c2_terms, "l1_norm": c2_l1}
 
     eta2 = c1_l1 * (t**2) / 2
     eta3 = c2_l1 * (t**3) / 6
@@ -190,31 +155,38 @@ def main():
 
     evolution_exact = expm(-1j * (A + B) * t * r)
 
-    def compensation_unitary(w_mat, angle, atol=1e-10):
-        """Build compensation unitary exp(i angle W) for Hermitian Pauli W."""
+    def sample_Pauli_then_compensate_exp(rng, s, atol=1e-10):
+        """Sample a Hermitian Pauli W from order-s commutator data"""
+        F_term = F_terms.get(s)
+        if F_term is None:
+            raise ValueError(f"unsupported order s={s}")
+        probs = np.abs(F_term["coeffs"]) / F_term["l1_norm"]
+        idx = int(rng.choice(len(F_term["terms"]), p=probs))
+        # For antiHermtian F_2 and F_3, the coeffs are purely imaginary, so W is Hermitian.
+        coeff = F_term["coeffs"][idx]
+        pauli = F_term["terms"][idx]
+
+        # With prob, sample I + eta_sum * (\pm 1j) * pauli, note the sign
+        sign = coeff / (1j * abs(coeff))
+        w_mat = sign * pauli
         hermitian_err = np.linalg.norm(w_mat - w_mat.conj().T, ord="fro")
         if hermitian_err > atol:
             raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
-        return expm(1j * angle * w_mat)
 
-    def sample_W_from_commutator(rng, s):
-        """Sample Hermitian Pauli W from strict commutator decomposition."""
-        data = order_data.get(s)
-        if data is None:
-            raise ValueError(f"unsupported order s={s}")
-        idx = int(rng.choice(len(data["terms"]), p=data["probs"]))
-        sign, pauli = data["terms"][idx]
-        return sign * pauli
-
-    def sample_component(rng, s):
-        return compensation_unitary(sample_W_from_commutator(rng, s), theta)
+        # aim to apply exp(i theta W) * \sqrt{1+eta_sum^2}.
+        # numerically we equivalently apply the term before pairing
+        return I + 1j * eta_sum * w_mat
 
     def tilde_V():
+        """Expectation of single-step compensation unitary"""
         tilde_v = np.zeros((2**N, 2**N), dtype=complex)
-        for s, p in zip([2, 3], p_s):
-            data = order_data[s]
-            for prob, (sign, pauli) in zip(data["probs"], data["terms"]):
-                tilde_v += p * prob * compensation_unitary(sign * pauli, theta)
+        for s, p_order in zip([2, 3], p_s):
+            F_term = F_terms[s]
+            probs = np.abs(F_term["coeffs"]) / F_term["l1_norm"]
+            for p_pauli, coeff, pauli in zip(probs, F_term["coeffs"], F_term["terms"]):
+                sign = coeff / (1j * abs(coeff))
+                w_mat = sign * pauli
+                tilde_v += p_order * p_pauli * (I + 1j * eta_sum * w_mat)
         return tilde_v
 
     # K = 1, sample from s = 2, 3
@@ -227,7 +199,7 @@ def main():
         V_list = []
         for _ in tqdm(range(trials), desc="single step trails"):
             s = int(rng.choice(s_list, p=p_s))
-            V_list.append(sample_component(rng, s))
+            V_list.append(sample_Pauli_then_compensate_exp(rng, s))
 
         V_average = sum(V_list) / trials
 
@@ -257,7 +229,7 @@ def main():
             evolution = np.eye(2**N, dtype=complex)
             for _ in range(r):
                 s = int(rng.choice(s_list, p=p_s))
-                evolution = sample_component(rng, s) @ S @ evolution
+                evolution = sample_Pauli_then_compensate_exp(rng, s) @ S @ evolution
 
             evolution_list.append(evolution)
 
@@ -305,7 +277,6 @@ def main():
         h=h,
         T=T,
         r=r,
-        Heisenberg=Heisenberg,
         trials=args.trials,
     )
 

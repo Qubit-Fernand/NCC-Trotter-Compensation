@@ -18,11 +18,11 @@ class OriginalStaticData:
     a_mat: np.ndarray
     b_mat: np.ndarray
     basis: list[np.ndarray]
-    c1_terms: list[tuple[float, np.ndarray]]
-    c1_probs: np.ndarray
+    c1_coeffs: np.ndarray
+    c1_terms: list[np.ndarray]
     c1_l1: float
-    c2_terms: list[tuple[float, np.ndarray]]
-    c2_probs: np.ndarray
+    c2_coeffs: np.ndarray
+    c2_terms: list[np.ndarray]
     c2_l1: float
     identity: np.ndarray
     h_total: np.ndarray
@@ -50,31 +50,27 @@ def parse_args(argv=None):
 
 
 def build_static_data(n: int, j: float, h: float) -> OriginalStaticData:
-    a_mat, b_mat = build_periodic_ab(n, j, h, heisenberg=False)
+    a_mat, b_mat = build_periodic_ab(n, j, h)
     basis = pauli_basis(n)
     c1 = commutator(b_mat, a_mat)
     c2 = 1j * (2 * commutator(b_mat, commutator(a_mat, b_mat)) + commutator(a_mat, commutator(a_mat, b_mat)))
-    c1_terms, c1_probs, c1_l1 = pauli_decomposition(c1, basis, antihermitian=True)
-    c2_terms, c2_probs, c2_l1 = pauli_decomposition(c2, basis, antihermitian=True)
+    c1_coeffs, c1_terms, c1_l1 = pauli_decomposition(c1, basis, antihermitian=True)
+    c2_coeffs, c2_terms, c2_l1 = pauli_decomposition(c2, basis, antihermitian=True)
     dim = 2**n
     return OriginalStaticData(
         n=n,
         a_mat=a_mat,
         b_mat=b_mat,
         basis=basis,
+        c1_coeffs=c1_coeffs,
         c1_terms=c1_terms,
-        c1_probs=c1_probs,
         c1_l1=c1_l1,
+        c2_coeffs=c2_coeffs,
         c2_terms=c2_terms,
-        c2_probs=c2_probs,
         c2_l1=c2_l1,
         identity=np.eye(dim, dtype=complex),
         h_total=a_mat + b_mat,
     )
-
-
-def compensation_unitary(w_mat: np.ndarray, angle: float) -> np.ndarray:
-    return expm(1j * angle * w_mat)
 
 
 def build_step_data(static: OriginalStaticData, t_total: float, r: int):
@@ -85,22 +81,24 @@ def build_step_data(static: OriginalStaticData, t_total: float, r: int):
     if eta_sum <= 0:
         raise ValueError("eta_sum must be positive")
     p_s = np.array([eta2 / eta_sum, eta3 / eta_sum], dtype=float)
-    theta = math.atan(eta_sum)
     s1 = expm(-1j * static.b_mat * t) @ expm(-1j * static.a_mat * t)
     u_exact = expm(-1j * static.h_total * t_total)
 
     tilde_v = np.zeros_like(static.identity)
-    for weight, probs, terms in (
-        (p_s[0], static.c1_probs, static.c1_terms),
-        (p_s[1], static.c2_probs, static.c2_terms),
+    for weight, coeffs, terms, l1_norm in (
+        (p_s[0], static.c1_coeffs, static.c1_terms, static.c1_l1),
+        (p_s[1], static.c2_coeffs, static.c2_terms, static.c2_l1),
     ):
-        for prob, (sign, pauli) in zip(probs, terms):
-            tilde_v += weight * prob * compensation_unitary(sign * pauli, theta)
+        probs = np.abs(coeffs) / l1_norm
+        for prob, coeff, pauli in zip(probs, coeffs, terms):
+            sign = coeff / (1j * abs(coeff))
+            w_mat = sign * pauli
+            tilde_v += weight * prob * (static.identity + 1j * eta_sum * w_mat)
 
     return {
         "t": t,
-        "theta": theta,
         "p_s": p_s,
+        "eta_sum": eta_sum,
         "eta2": eta2,
         "eta3": eta3,
         "s1": s1,
@@ -109,15 +107,30 @@ def build_step_data(static: OriginalStaticData, t_total: float, r: int):
     }
 
 
-def sample_component(rng: np.random.Generator, static: OriginalStaticData, p_s: np.ndarray, theta: float) -> np.ndarray:
+def sample_Pauli_then_compensate_exp(
+    rng: np.random.Generator,
+    static: OriginalStaticData,
+    p_s: np.ndarray,
+    eta_sum: float,
+    atol: float = 1e-10,
+) -> np.ndarray:
     order = int(rng.choice(2, p=p_s))
     if order == 0:
-        idx = int(rng.choice(len(static.c1_terms), p=static.c1_probs))
-        sign, pauli = static.c1_terms[idx]
+        probs = np.abs(static.c1_coeffs) / static.c1_l1
+        idx = int(rng.choice(len(static.c1_terms), p=probs))
+        coeff = static.c1_coeffs[idx]
+        pauli = static.c1_terms[idx]
     else:
-        idx = int(rng.choice(len(static.c2_terms), p=static.c2_probs))
-        sign, pauli = static.c2_terms[idx]
-    return compensation_unitary(sign * pauli, theta)
+        probs = np.abs(static.c2_coeffs) / static.c2_l1
+        idx = int(rng.choice(len(static.c2_terms), p=probs))
+        coeff = static.c2_coeffs[idx]
+        pauli = static.c2_terms[idx]
+    sign = coeff / (1j * abs(coeff))
+    w_mat = sign * pauli
+    hermitian_err = np.linalg.norm(w_mat - w_mat.conj().T, ord="fro")
+    if hermitian_err > atol:
+        raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
+    return static.identity + 1j * eta_sum * w_mat
 
 
 def estimate_total_sample_error(static: OriginalStaticData, t_total: float, r: int, trials: int, seed: int):
@@ -127,7 +140,7 @@ def estimate_total_sample_error(static: OriginalStaticData, t_total: float, r: i
     for _ in tqdm(range(trials), desc=f"r={r}", leave=False, disable=not sys.stderr.isatty()):
         evo = static.identity.copy()
         for _ in range(r):
-            evo = sample_component(rng, static, step["p_s"], step["theta"]) @ step["s1"] @ evo
+            evo = sample_Pauli_then_compensate_exp(rng, static, step["p_s"], step["eta_sum"]) @ step["s1"] @ evo
         evo_average += evo
     evo_average /= trials
 
@@ -137,7 +150,8 @@ def estimate_total_sample_error(static: OriginalStaticData, t_total: float, r: i
         "sample_fluctuation": float(np.linalg.norm(evo_average - deterministic, 2)),
         "expectation_bias": float(np.linalg.norm(deterministic - step["u_exact"], 2)),
         "t": float(step["t"]),
-        "theta": float(step["theta"]),
+        "theta": float("nan"),
+        "eta_sum": float(step["eta_sum"]),
         "eta2": float(step["eta2"]),
         "eta3": float(step["eta3"]),
     }
@@ -173,10 +187,7 @@ def normalized_tag_suffix(tag: str) -> str:
 def sampling_out_base(args) -> Path:
     suffix = normalized_tag_suffix(args.tag)
     out_dir = resolve_output_dir(args.out_dir, args.tag)
-    return out_dir / (
-        f"NCC_original_sampling_r_N{args.N}_T{args.T:g}_eps{args.epsilon:g}_"
-        f"trials{args.trials}_repeats{args.repeats}{suffix}"
-    )
+    return out_dir / (f"NCC_original_sampling_r_N{args.N}_T{args.T:g}_eps{args.epsilon:g}_" f"trials{args.trials}_repeats{args.repeats}{suffix}")
 
 
 def save_sampling_checkpoint(out_base: Path, payload: dict):
@@ -199,6 +210,7 @@ def save_sampling_checkpoint(out_base: Path, payload: dict):
         eval_expectation_bias=np.array([item["expectation_bias"] for item in payload["evaluations"]], dtype=float),
         eval_sample_fluctuation=np.array([item["sample_fluctuation"] for item in payload["evaluations"]], dtype=float),
     )
+
 
 def find_r_min_sampling(
     static: OriginalStaticData,
@@ -223,8 +235,7 @@ def find_r_min_sampling(
         cache[r] = result
         evaluations.append({"repetition": repetition, "r": r, **result})
         print(
-            f"{progress_label} eval r={r}: sample_error={result['sample_error']:.6e}, "
-            f"bias={result['expectation_bias']:.6e}, fluct={result['sample_fluctuation']:.6e}"
+            f"{progress_label} eval r={r}: sample_error={result['sample_error']:.6e}, " f"bias={result['expectation_bias']:.6e}, fluct={result['sample_fluctuation']:.6e}"
         )
         if checkpoint_cb is not None:
             checkpoint_cb()
