@@ -294,7 +294,7 @@ def main(argv=None):
     q0 = int(np.ceil(np.log(2 * args.N / args.epsilon))) if args.q0 <= 0 else args.q0
     q0 = max(3, q0)
     output_path = sampling_output_path(args, q0, s0)
-    static = build_static_data(args.N, args.epsilon, j=args.J, h=args.h, K=1, q0=q0, s0=s0)
+    static = build_static_data(n=args.N, q0=q0, s0=s0, epsilon=args.epsilon, j=args.J, h=args.h, K=1)
     payload = {
         "script": "NCC_log_sampling_r.py",
         "params": {
