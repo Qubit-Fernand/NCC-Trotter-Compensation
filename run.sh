@@ -12,7 +12,7 @@ OUT_DIR="${OUT_DIR:-data}"
 R_MAX="${R_MAX:-1024}"
 
 GRID_NS=(4)
-EXTRA_NS=(5 6 7)
+EXTRA_NS=(5 6 7 8 9 10)
 TS=(0.2 0.4 0.6 0.8 1.0 1.2 2.0)
 EPSILONS=(0.00125 0.0025 0.005 0.01 0.02 0.04 0.1)
 SCRIPTS=(NCC_original_sampling_r.py NCC_log_sampling_r.py)
