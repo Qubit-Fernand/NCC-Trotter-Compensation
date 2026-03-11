@@ -24,6 +24,12 @@ def build_parser():
     parser.add_argument("--seed", type=int, default=7, help="base RNG seed")
     parser.add_argument("--r-max", type=int, default=512, help="maximal r allowed during search")
     parser.add_argument("--s0", type=int, default=0, help="override log truncation order")
+    parser.add_argument(
+        "--q0",
+        type=int,
+        default=0,
+        help="max BCH order kept in tilde_F construction (0 => ceil(log(2N/epsilon)))",
+    )
     parser.add_argument("--save-every-search", action="store_true", help="checkpoint after every sampled r search step")
     return parser
 
@@ -45,14 +51,7 @@ def confidence_interval(values: np.ndarray) -> tuple[float, float, float]:
     return mean, mean - half_width, mean + half_width
 
 
-def effective_s0(epsilon: float, requested_s0: int) -> int:
-    if requested_s0 > 0:
-        return max(3, int(requested_s0))
-    return max(3, int(np.ceil(np.log(4 / epsilon))))
-
-
-def effective_q0(n: int, epsilon: float) -> int:
-    return int(np.ceil(np.log(4 * n / epsilon)))
+"""The following three functions handle the path"""
 
 
 def resolve_output_dir(base_out_dir: Path, tag: str) -> Path:
@@ -69,13 +68,10 @@ def normalized_tag_suffix(tag: str) -> str:
     return f"_{tag}"
 
 
-def sampling_output_path(args) -> Path:
+def sampling_output_path(args, q0, s0) -> Path:
     suffix = normalized_tag_suffix(args.tag)
-    actual_s0 = effective_s0(args.epsilon, args.s0)
-    default_s0 = effective_s0(args.epsilon, 0)
-    s0_suffix = f"_s0{actual_s0}" if actual_s0 != default_s0 else ""
     output_dir = resolve_output_dir(args.out_dir, args.tag)
-    return output_dir / (f"NCC_log_sampling_r_N{args.N}_T{args.T:g}_eps{args.epsilon:g}_" f"trials{args.trials}_repeats{args.repeats}{s0_suffix}{suffix}")
+    return output_dir / (f"NCC_log_sampling_r_N{args.N}_T{args.T:g}_eps{args.epsilon:g}_" f"trials{args.trials}_repeats{args.repeats}_q{q0}_s{s0}{suffix}")
 
 
 def grouped_search_array(payload: dict, key: str, fill_value, dtype):
@@ -203,22 +199,18 @@ def estimate_total_sample_error(
 
 
 def search_r_min(
-    n: int,
+    static: dict,
     t_total: float,
     epsilon: float,
     trials: int,
     repetition: int,
     base_seed: int,
     r_max: int,
-    j: float,
-    h: float,
-    s0: int,
     searches: list[dict],
     progress_label: str,
     checkpoint_cb=None,
 ):
     """Search expected and sampled r_min while reusing cached search results."""
-    static = build_static_data(n, epsilon, j=j, h=h, K=1, s0=s0 or None)
     result_cache: dict[int, dict] = {}
     evolution_cache: dict[int, dict] = {}
 
@@ -297,9 +289,12 @@ def search_r_min(
 def main(argv=None):
     args = parse_args(argv)
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    output_path = sampling_output_path(args)
-    actual_s0 = effective_s0(args.epsilon, args.s0)
-    q_0 = effective_q0(args.N, args.epsilon)
+    s0 = int(np.ceil(np.log(4 / args.epsilon))) if args.s0 <= 0 else args.s0
+    s0 = max(3, s0)
+    q0 = int(np.ceil(np.log(2 * args.N / args.epsilon))) if args.q0 <= 0 else args.q0
+    q0 = max(3, q0)
+    output_path = sampling_output_path(args, q0, s0)
+    static = build_static_data(args.N, args.epsilon, j=args.J, h=args.h, K=1, q0=q0, s0=s0)
     payload = {
         "script": "NCC_log_sampling_r.py",
         "params": {
@@ -314,8 +309,8 @@ def main(argv=None):
             "base_seed": args.seed,
             "r_max": args.r_max,
             "sampling": "weighted",
-            "s0": actual_s0,
-            "q_0": q_0,
+            "s0": s0,
+            "q0": q0,
         },
         "sampled_r_mins": [],
         "expected_r_mins": [],
@@ -327,8 +322,6 @@ def main(argv=None):
         "searches": [],
     }
 
-    build_static_data(args.N, args.epsilon, j=args.J, h=args.h, K=1, s0=actual_s0)
-
     def checkpoint():
         # Persist the partial payload so long runs can be resumed/reviewed even
         # if the process stops mid-search.
@@ -337,16 +330,13 @@ def main(argv=None):
     for repetition in range(args.repeats):
         label = f"[repeat {repetition + 1}/{args.repeats}]"
         sampled_r_min, metrics, expected_r_min = search_r_min(
-            n=args.N,
+            static=static,
             t_total=args.T,
             epsilon=args.epsilon,
             trials=args.trials,
             repetition=repetition,
             base_seed=args.seed,
             r_max=args.r_max,
-            j=args.J,
-            h=args.h,
-            s0=actual_s0,
             searches=payload["searches"],
             progress_label=label,
             checkpoint_cb=checkpoint if args.save_every_search else None,

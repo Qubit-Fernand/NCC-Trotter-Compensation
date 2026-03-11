@@ -38,7 +38,7 @@ def parse_args():
         "--q0",
         type=int,
         default=0,
-        help="max BCH order kept in tilde_F construction (0 => ceil(log(4N/epsilon)))",
+        help="max BCH order kept in tilde_F construction (0 => ceil(log(2N/epsilon)))",
     )
     return parser.parse_args()
 
@@ -226,14 +226,6 @@ def pauli_decomposition(mat, basis, antihermitian=False, tol=1e-10):
 @lru_cache(maxsize=None)
 def build_static_data(n, epsilon=0.01, j=1.0, h=1.0, K=1, q0=None, s0=None):
     """Precompute r-independent data for log-NCC evaluation."""
-    if s0 is None:
-        s0 = max(3, int(np.ceil(np.log(4 / epsilon))))
-    else:
-        s0 = max(3, int(s0))
-    if q0 is None:
-        q0 = max(s0, int(np.ceil(np.log(4 * n / epsilon))))
-    else:
-        q0 = max(int(q0), s0)
 
     A_mat, B_mat = build_periodic_ab(n, j, h)
     basis = pauli_basis(n)
@@ -389,8 +381,8 @@ def main():
     coeff = a_max * kappa + 1
     s0 = int(np.ceil(np.log(4 / epsilon))) if args.s0 <= 0 else args.s0
     s0 = max(3, s0)
-    q0 = int(np.ceil(np.log(4 * n / epsilon))) if args.q0 <= 0 else args.q0
-    q0 = max(q0, s0)
+    q0 = int(np.ceil(np.log(2 * n / epsilon))) if args.q0 <= 0 else args.q0
+    q0 = max(3, q0)
     lambda_comm = 4 * coeff * q0 * k_local * g * (2 * n) ** (1 / 2)
 
     cond_bch_truncation = 8 * math.e * k_local * q0 * coeff * g * t
