@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from NCC_log import build_static_data, build_tilde_v
+from NCC_log import build_static_data, build_tilde_V
 
 
 def build_parser():
@@ -125,25 +125,28 @@ def save_sampling_checkpoint(output_path: Path, payload: dict):
 def sample_Pauli_then_compensate_exp(
     rng: np.random.Generator,
     identity: np.ndarray,
-    f_terms: dict,
+    F_terms: dict,
     order: int,
     eta_pair_sum: float,
     pair_scale: float,
+    raw_total: float,
     atol: float = 1e-10,
 ):
-    data = f_terms[order]
+    data = F_terms[order]
     probs = np.abs(data["coeffs"]) / data["l1_norm"]
     idx = int(rng.choice(len(data["terms"]), p=probs))
     coeff = data["coeffs"][idx]
     pauli = data["terms"][idx]
     if data["kind"] == "pair":
         phase = coeff / (1j * abs(coeff))
-        w_mat = phase * pauli
-        hermitian_err = np.linalg.norm(w_mat - w_mat.conj().T, ord="fro")
+        W_mat = phase * pauli
+        hermitian_err = np.linalg.norm(W_mat - W_mat.conj().T, ord="fro")
         if hermitian_err > atol:
             raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
-        return (identity + 1j * eta_pair_sum * w_mat) / pair_scale
-    return coeff / abs(coeff) * pauli
+        # apply exp(i theta W), you must multiply total 1-norm raw_total.
+        return raw_total * ((identity + 1j * eta_pair_sum * W_mat) / pair_scale)
+    # apply W like (1+i)X, you must multiply total 1-norm raw_total.
+    return raw_total * (coeff / abs(coeff) * pauli)
 
 
 def estimate_total_sample_error(
@@ -157,7 +160,7 @@ def estimate_total_sample_error(
 ):
     """Estimate sampled total error for a fixed r using Monte Carlo trajectories."""
     s_orders = static["s_orders"]
-    f_terms = static["F_terms"]
+    F_terms = static["F_terms"]
     identity = static["identity"]
     raw_weights = evolution_data["raw_weights"]
     raw_total = float(sum(raw_weights.values()))
@@ -170,16 +173,14 @@ def estimate_total_sample_error(
         for _ in range(r):
             order = int(rng.choice(s_orders, p=p_order))
             evo = (
-                (
-                    raw_total
-                    * sample_Pauli_then_compensate_exp(
-                        rng,
-                        identity,
-                        f_terms,
-                        order,
-                        evolution_data["eta_pair_sum"],
-                        evolution_data["pair_scale"],
-                    )
+                sample_Pauli_then_compensate_exp(
+                    rng,
+                    identity,
+                    F_terms,
+                    order,
+                    evolution_data["eta_pair_sum"],
+                    evolution_data["pair_scale"],
+                    raw_total,
                 )
                 @ evolution_data["s1"]
                 @ evo
@@ -187,9 +188,9 @@ def estimate_total_sample_error(
         evo_average += evo
     evo_average /= trials
 
-    deterministic = np.linalg.matrix_power(evolution_data["tilde_v"] @ evolution_data["s1"], r)
+    deterministic = np.linalg.matrix_power(evolution_data["tilde_V"] @ evolution_data["s1"], r)
     return {
-        "sample_error": float(np.linalg.norm(evo_average - evolution_data["u_exact"], 2)),
+        "sample_error": float(np.linalg.norm(evo_average - evolution_data["U_exact"], 2)),
         "sample_fluctuation": float(np.linalg.norm(evo_average - deterministic, 2)),
         "expectation_bias": expectation_bias,
         "eta_pair_sum": float(evolution_data["eta_pair_sum"]),
@@ -217,7 +218,7 @@ def search_r_min(
     checkpoint_cb=None,
 ):
     """Search expected and sampled r_min while reusing cached search results."""
-    static = build_static_data(n, epsilon, j=j, h=h, kappa=1, s0=s0 or None)
+    static = build_static_data(n, epsilon, j=j, h=h, K=1, s0=s0 or None)
     result_cache: dict[int, dict] = {}
     evolution_cache: dict[int, dict] = {}
 
@@ -229,7 +230,7 @@ def search_r_min(
             # For sample_error, run the full Monte Carlo evaluation once and cache it.
             if metric_key == "expectation_bias":
                 if r not in evolution_cache:
-                    evolution_cache[r] = build_tilde_v(static, t_total, r)
+                    evolution_cache[r] = build_tilde_V(static, t_total, r)
                 return {"expectation_bias": evolution_cache[r]["deterministic_bias"]}
 
             elif metric_key == "sample_error":
@@ -237,7 +238,7 @@ def search_r_min(
                     return result_cache[r]
                 seed = make_search_seed(base_seed, repetition, r)
                 if r not in evolution_cache:
-                    evolution_cache[r] = build_tilde_v(static, t_total, r)
+                    evolution_cache[r] = build_tilde_V(static, t_total, r)
                 evolution_data = evolution_cache[r]
                 result = estimate_total_sample_error(
                     static=static,
@@ -326,7 +327,7 @@ def main(argv=None):
         "searches": [],
     }
 
-    build_static_data(args.N, args.epsilon, j=args.J, h=args.h, kappa=1, s0=actual_s0)
+    build_static_data(args.N, args.epsilon, j=args.J, h=args.h, K=1, s0=actual_s0)
 
     def checkpoint():
         # Persist the partial payload so long runs can be resumed/reviewed even

@@ -18,6 +18,7 @@ Y = np.array([[0, -1j], [1j, 0]])  # Pauli-Y matrix
 Z = np.array([[1, 0], [0, -1]])  # Pauli-Z matrix
 I = np.eye(2)  # Identity matrix
 
+
 def commutator(A, B):
     """Compute the commutator [A, B] = AB - BA"""
     return A @ B - B @ A
@@ -63,13 +64,13 @@ def build_periodic_ab(num_qubits, coupling_j, field_h):
             np.kron(Z, np.eye(2 ** (num_qubits - index - 1), dtype=complex)),
         )
 
-    a_mat = np.zeros((2**num_qubits, 2**num_qubits), dtype=complex)
-    b_mat = np.zeros((2**num_qubits, 2**num_qubits), dtype=complex)
+    A_mat = np.zeros((2**num_qubits, 2**num_qubits), dtype=complex)
+    B_mat = np.zeros((2**num_qubits, 2**num_qubits), dtype=complex)
     for index in range(0, num_qubits, 2):
-        a_mat += two_local_term(index, X) + two_local_term(index, Y) + two_local_term(index, Z) + z_term(index)
+        A_mat += two_local_term(index, X) + two_local_term(index, Y) + two_local_term(index, Z) + z_term(index)
     for index in range(1, num_qubits, 2):
-        b_mat += two_local_term(index, X) + two_local_term(index, Y) + two_local_term(index, Z) + z_term(index)
-    return a_mat, b_mat
+        B_mat += two_local_term(index, X) + two_local_term(index, Y) + two_local_term(index, Z) + z_term(index)
+    return A_mat, B_mat
 
 
 def pauli_decomposition(matrix, basis, antihermitian=False, tol=1e-10):
@@ -101,18 +102,20 @@ def pauli_decomposition(matrix, basis, antihermitian=False, tol=1e-10):
 
 @lru_cache(maxsize=None)
 def build_static_data(n: int, j: float, h: float) -> dict:
-    a_mat, b_mat = build_periodic_ab(n, j, h)
+    A_mat, B_mat = build_periodic_ab(n, j, h)
     basis = pauli_basis(n)
-    c1 = commutator(b_mat, a_mat)
-    c2 = 1j * (2 * commutator(b_mat, commutator(a_mat, b_mat)) + commutator(a_mat, commutator(a_mat, b_mat)))
+    c1 = commutator(B_mat, A_mat)
+    c2 = 1j * (2 * commutator(B_mat, commutator(A_mat, B_mat)) + commutator(A_mat, commutator(A_mat, B_mat)))
     c1_coeffs, c1_terms, c1_l1 = pauli_decomposition(c1, basis, antihermitian=True)
     c2_coeffs, c2_terms, c2_l1 = pauli_decomposition(c2, basis, antihermitian=True)
     dim = 2**n
     return {
         "n": n,
-        "a_mat": a_mat,
-        "b_mat": b_mat,
+        "A_mat": A_mat,
+        "B_mat": B_mat,
         "basis": basis,
+        "C1": c1,
+        "C2": c2,
         "c1_coeffs": c1_coeffs,
         "c1_terms": c1_terms,
         "c1_l1": c1_l1,
@@ -120,12 +123,12 @@ def build_static_data(n: int, j: float, h: float) -> dict:
         "c2_terms": c2_terms,
         "c2_l1": c2_l1,
         "identity": np.eye(dim, dtype=complex),
-        "h_total": a_mat + b_mat,
+        "h_total": A_mat + B_mat,
     }
 
 
-def build_tilde_v(static, t_total: float, r: int):
-    """Build evolution data and deterministic bias for the original-NCC step."""
+def build_tilde_V(static, t_total: float, r: int, validation_tol=1e-10):
+    """Build tilde_V and deterministic bias for the original-NCC step."""
     t = t_total / r
     eta2 = static["c1_l1"] * (t**2) / 2
     eta3 = static["c2_l1"] * (t**3) / 6
@@ -133,10 +136,10 @@ def build_tilde_v(static, t_total: float, r: int):
     if eta_sum <= 0:
         raise ValueError("eta_sum must be positive")
     p_s = np.array([eta2 / eta_sum, eta3 / eta_sum], dtype=float)
-    s1 = expm(-1j * static["b_mat"] * t) @ expm(-1j * static["a_mat"] * t)
-    u_exact = expm(-1j * static["h_total"] * t_total)
+    s1 = expm(-1j * static["B_mat"] * t) @ expm(-1j * static["A_mat"] * t)
+    U_exact = expm(-1j * static["h_total"] * t_total)
 
-    tilde_v = np.zeros_like(static["identity"])
+    tilde_V = np.zeros_like(static["identity"])
     for weight, coeffs, terms, l1_norm in (
         (p_s[0], static["c1_coeffs"], static["c1_terms"], static["c1_l1"]),
         (p_s[1], static["c2_coeffs"], static["c2_terms"], static["c2_l1"]),
@@ -144,11 +147,17 @@ def build_tilde_v(static, t_total: float, r: int):
         probs = np.abs(coeffs) / l1_norm
         for prob, coeff, pauli in zip(probs, coeffs, terms):
             sign = coeff / (1j * abs(coeff))
-            w_mat = sign * pauli
-            tilde_v += weight * prob * (static["identity"] + 1j * eta_sum * w_mat)
+            W_mat = sign * pauli
+            tilde_V += weight * prob * (static["identity"] + 1j * eta_sum * W_mat)
 
-    deterministic = np.linalg.matrix_power(tilde_v @ s1, r)
-    deterministic_bias = float(np.linalg.norm(deterministic - u_exact, 2))
+    # Taylor form for original NCC: I + C1 t^2 / 2 + C2 t^3 / 6.
+    tilde_V_taylor = static["identity"] + static["C1"] * (t**2) / 2 + static["C2"] * (t**3) / 6
+    validation_error = float(np.linalg.norm(tilde_V - tilde_V_taylor, 2))
+    if validation_error > validation_tol:
+        raise ValueError(f"tilde_V mismatch between compensation sum and Taylor sum: {validation_error:.3e}")
+
+    deterministic = np.linalg.matrix_power(tilde_V @ s1, r)
+    deterministic_bias = float(np.linalg.norm(deterministic - U_exact, 2))
 
     return {
         "t": t,
@@ -157,10 +166,12 @@ def build_tilde_v(static, t_total: float, r: int):
         "eta2": eta2,
         "eta3": eta3,
         "s1": s1,
-        "u_exact": u_exact,
-        "tilde_v": tilde_v,
+        "U_exact": U_exact,
+        "tilde_V": tilde_V,
+        # "tilde_V_taylor": tilde_V_taylor,
         "deterministic": deterministic,
         "deterministic_bias": deterministic_bias,
+        "validation_error": validation_error,
     }
 
 
@@ -175,39 +186,30 @@ def main():
     r = args.r
 
     g = 2 * (J + h)  # extensive parameter
-    k = 2  # 2-local Hamiltonian
-
     t = T / r  # step size
-
-    K = 1
-
-    # target accuracy
-    epsilon = 0.01
+    K = 1  # order of product formula, fixed to 1 for original NCC
 
     print("time step:", t)
 
     static = build_static_data(N, J, h)
-    evolution_data = build_tilde_v(static, T, r)
-    A = static["a_mat"]
-    B = static["b_mat"]
+    evolution_data = build_tilde_V(static, T, r)
+    A = static["A_mat"]
+    B = static["B_mat"]
 
     # note the order of exp(A) and exp(B)
     S = evolution_data["s1"]
-    tilde_v = evolution_data["tilde_v"]
-    V_exact = expm(-1j * (A + B) * t) @ expm(1j * A * t) @ expm(1j * B * t)
+    V_exact = expm(-1j * static["h_total"] * t) @ expm(1j * A * t) @ expm(1j * B * t)
+    tilde_V = evolution_data["tilde_V"]
+    S_r = np.linalg.matrix_power(S, r)
+    evolution_exact = evolution_data["U_exact"]
+    identity = static["identity"]
 
     print("C1 l1:", static["c1_l1"])
     print("C2 l1:", static["c2_l1"])
     print("C1/C2 Pauli terms:", len(static["c1_terms"]), len(static["c2_terms"]))
     print("eta2, eta3:", evolution_data["eta2"], evolution_data["eta3"])
     print("p_s:", evolution_data["p_s"])
-
-    S_r = np.eye(2**N, dtype=complex)
-    for _ in range(r):
-        S_r = S @ S_r
-
-    evolution_exact = expm(-1j * (A + B) * t * r)
-    identity = static["identity"]
+    print("tilde_V compensation-vs-Taylor check:", evolution_data["validation_error"])
 
     def sample_Pauli_then_compensate_exp(rng, s, atol=1e-10):
         """Sample a Hermitian Pauli W from order-s commutator data"""
@@ -229,18 +231,15 @@ def main():
 
         # With prob, sample I + eta_sum * (\pm 1j) * pauli, note the sign
         sign = coeff / (1j * abs(coeff))
-        w_mat = sign * pauli
-        hermitian_err = np.linalg.norm(w_mat - w_mat.conj().T, ord="fro")
+        W_mat = sign * pauli
+        hermitian_err = np.linalg.norm(W_mat - W_mat.conj().T, ord="fro")
         if hermitian_err > atol:
             raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
 
-        # aim to apply exp(i theta W) * \sqrt{1+eta_sum^2}.
-        # numerically we equivalently apply the term before pairing
-        return identity + 1j * evolution_data["eta_sum"] * w_mat
-
-    def tilde_V():
-        """Expectation of single-step compensation unitary"""
-        return tilde_v
+        # apply exp(i theta W), you must multiply total 1-norm \sqrt{1+eta_sum^2}.
+        # numerically we equivalently apply the term before pairing,
+        # which is equivalent to 1-norm * (I + i eta_sum W / 1-norm) = I + i eta_sum W
+        return identity + 1j * evolution_data["eta_sum"] * W_mat
 
     # K = 1, sample from s = 2, 3
     def NCC_sampling(trials):
@@ -258,14 +257,13 @@ def main():
 
         return V_list, V_average
 
-    single_step_error_before = np.linalg.norm(S - expm(-1j * (A + B) * t), 2)
+    single_step_error_before = np.linalg.norm(S - expm(-1j * static["h_total"] * t), 2)
     print("single Trotter step error before compensation:\n", single_step_error_before)
 
-    tilde_v = tilde_V()
     V_list, V_average = NCC_sampling(trials=args.trials)
     single_step_error_after = np.linalg.norm(V_average - V_exact, 2)
-    single_step_fluctuation = np.linalg.norm(V_average - tilde_v, 2)
-    single_step_bias = np.linalg.norm(tilde_v - V_exact, 2)
+    single_step_fluctuation = np.linalg.norm(V_average - tilde_V, 2)
+    single_step_bias = np.linalg.norm(tilde_V - V_exact, 2)
 
     print("single step error after compensation:\n", single_step_error_after)
     print("single step fluctuation:\n", single_step_fluctuation)
@@ -279,7 +277,7 @@ def main():
 
         evolution_list = []
         for _ in tqdm(range(trials), desc="multi step trials"):
-            evolution = np.eye(2**N, dtype=complex)
+            evolution = identity.copy()
             for _ in range(r):
                 s = int(rng.choice(s_list, p=evolution_data["p_s"]))
                 evolution = sample_Pauli_then_compensate_exp(rng, s) @ S @ evolution
@@ -302,21 +300,21 @@ def main():
     print("total evolution fluctuation:\n", total_fluctuation)
     print("total evolution expectation bias:\n", total_bias)
 
-    data_dir = Path("data_local_unitary_list")
+    data_dir = Path("data/no_search")
     data_dir.mkdir(parents=True, exist_ok=True)
-    output_path = data_dir / f"NCC_original_trials{args.trials}.npz"
+    output_path = data_dir / f"NCC_original_trials{args.trials}_N{args.N}_r{args.r}.npz"
     print("saving results to:", output_path)
     np.savez(
         output_path,
         A=A,
         B=B,
         S=S,
-        V_tilde=tilde_v,
+        V_tilde=tilde_V,
         V_exact=V_exact,
         V_average=V_average,
-        V_list=np.array(V_list, dtype=object),
+        V_list=np.stack(V_list),
         evolution_average=evolution_average,
-        evolution_list=np.array(evolution_list, dtype=object),
+        evolution_list=np.stack(evolution_list),
         single_step_error_before=single_step_error_before,
         single_step_error_after=single_step_error_after,
         single_step_fluctuation=single_step_fluctuation,

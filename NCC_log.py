@@ -34,6 +34,12 @@ def parse_args():
         default=0,
         help="max compensated order (0 => ceil(log(4/epsilon)))",
     )
+    parser.add_argument(
+        "--q0",
+        type=int,
+        default=0,
+        help="max BCH order kept in tilde_F construction (0 => ceil(log(4N/epsilon)))",
+    )
     return parser.parse_args()
 
 
@@ -75,23 +81,23 @@ def build_periodic_ab(n, j, h):
     return a_mat, b_mat
 
 
-def phi_term_log_fit(a_mat, b_mat, q_max, base_step=None):
+def phi_term_log_fit(A_mat, B_mat, q_max, base_step=None):
     """Archived numeric extractor: fit Phi_q from log(V(x)) near x=0."""
 
-    def bch_remainder(a_mat, b_mat, x):
-        return expm(-1j * (a_mat + b_mat) * x) @ expm(1j * a_mat * x) @ expm(1j * b_mat * x)
+    def bch_remainder(A_mat, B_mat, x):
+        return expm(-1j * (A_mat + B_mat) * x) @ expm(1j * A_mat * x) @ expm(1j * B_mat * x)
 
     def logm_close_to_identity(unitary_like):
         omega = logm(unitary_like)
         omega = 0.5 * (omega - omega.conj().T)
         return omega
 
-    dim = a_mat.shape[0]
+    dim = A_mat.shape[0]
     if base_step is None:
         op_scale = max(
-            np.linalg.norm(a_mat, 2),
-            np.linalg.norm(b_mat, 2),
-            np.linalg.norm(a_mat + b_mat, 2),
+            np.linalg.norm(A_mat, 2),
+            np.linalg.norm(B_mat, 2),
+            np.linalg.norm(A_mat + B_mat, 2),
             1.0,
         )
         base_step = min(0.02, 0.2 / op_scale)
@@ -103,7 +109,7 @@ def phi_term_log_fit(a_mat, b_mat, q_max, base_step=None):
         xs = base_step / (2.0 ** np.arange(fit_order))
         samples = []
         for x in xs:
-            omega = logm_close_to_identity(bch_remainder(a_mat, b_mat, x))
+            omega = logm_close_to_identity(bch_remainder(A_mat, B_mat, x))
             residual = omega.copy()
             for lower_q in range(2, q):
                 residual -= phi_terms[lower_q] * (x**lower_q)
@@ -114,7 +120,7 @@ def phi_term_log_fit(a_mat, b_mat, q_max, base_step=None):
     return phi_terms, base_step
 
 
-def phi_term(a_mat, b_mat, q_max, base_step=None):
+def phi_term(A_mat, B_mat, q_max, base_step=None):
     """Compute Phi_q directly from the BCH commutator formula in the PDF.
 
     ``base_step`` is accepted for backward compatibility with older notebook
@@ -138,8 +144,8 @@ def phi_term(a_mat, b_mat, q_max, base_step=None):
             out = commutator(op, out)
         return out
 
-    x_ops = [1j * b_mat, 1j * a_mat, -1j * (a_mat + b_mat)]  # X1, X2, X3
-    dim = a_mat.shape[0]
+    x_ops = [1j * B_mat, 1j * A_mat, -1j * (A_mat + B_mat)]  # X1, X2, X3
+    dim = A_mat.shape[0]
     phi_terms = {}
     for q in range(2, q_max + 1):
         total = np.zeros((dim, dim), dtype=complex)
@@ -159,7 +165,7 @@ def phi_term(a_mat, b_mat, q_max, base_step=None):
     return phi_terms, None
 
 
-def tilde_F_term(phi_terms, k_order, q0, s0):
+def tilde_F_term(Phi_terms, k_order, q0, s0):
     """Return matrices C_s with \tilde F_{K,s}(x) = C_s x^s."""
 
     def iter_compositions(total, parts, lower, upper):
@@ -175,8 +181,8 @@ def tilde_F_term(phi_terms, k_order, q0, s0):
             for rest in iter_compositions(total - first, parts - 1, lower, upper):
                 yield (first,) + rest
 
-    dim = next(iter(phi_terms.values())).shape[0]
-    tilde_f_terms = {}
+    dim = next(iter(Phi_terms.values())).shape[0]
+    tilde_F_terms = {}
     q_min = k_order + 1
     for s in range(q_min, s0 + 1):
         total = np.zeros((dim, dim), dtype=complex)
@@ -185,10 +191,10 @@ def tilde_F_term(phi_terms, k_order, q0, s0):
             for q_tuple in iter_compositions(s, j, q_min, q0):
                 product = np.eye(dim, dtype=complex)
                 for q in q_tuple:
-                    product = product @ phi_terms[q]
+                    product = product @ Phi_terms[q]
                 total += product / math.factorial(j)
-        tilde_f_terms[s] = total
-    return tilde_f_terms
+        tilde_F_terms[s] = total
+    return tilde_F_terms
 
 
 def pauli_decomposition(mat, basis, antihermitian=False, tol=1e-10):
@@ -218,40 +224,45 @@ def pauli_decomposition(mat, basis, antihermitian=False, tol=1e-10):
 
 
 @lru_cache(maxsize=None)
-def build_static_data(n, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
+def build_static_data(n, epsilon=0.01, j=1.0, h=1.0, K=1, q0=None, s0=None):
     """Precompute r-independent data for log-NCC evaluation."""
     if s0 is None:
         s0 = max(3, int(np.ceil(np.log(4 / epsilon))))
     else:
         s0 = max(3, int(s0))
+    if q0 is None:
+        q0 = max(s0, int(np.ceil(np.log(4 * n / epsilon))))
+    else:
+        q0 = max(int(q0), s0)
 
-    a_mat, b_mat = build_periodic_ab(n, j, h)
+    A_mat, B_mat = build_periodic_ab(n, j, h)
     basis = pauli_basis(n)
-    phi_terms, _ = phi_term(a_mat, b_mat, s0)
-    tilde_f_terms = tilde_F_term(phi_terms, kappa, s0, s0)
+    Phi_terms, _ = phi_term(A_mat, B_mat, q0)
+    tilde_F_terms = tilde_F_term(Phi_terms, K, q0, s0)
     identity = np.eye(2**n, dtype=complex)
 
+    # F_terms is the Pauli decomposition of the tilde_F_terms, tagged pairable or not.
     F_terms = {}
     phi_l1 = {}
-    tilde_f_l1 = {}
+    tilde_F_l1 = {}
     pairable_orders = []
     non_pairable_orders = []
-    for order in range(kappa + 1, s0 + 1):
-        phi_q = phi_terms[order]
+    for order in range(K + 1, s0 + 1):
+        phi_q = Phi_terms[order]
         _, _, phi_q_l1 = pauli_decomposition(phi_q, basis, antihermitian=True)
         phi_l1[order] = phi_q_l1
 
-        coeffs, terms, l1_norm = pauli_decomposition(tilde_f_terms[order], basis)
+        coeffs, terms, l1_norm = pauli_decomposition(tilde_F_terms[order], basis)
         F_terms[order] = {"kind": "tail", "coeffs": coeffs, "terms": terms, "l1_norm": l1_norm}
-        tilde_f_l1[order] = l1_norm
+        tilde_F_l1[order] = l1_norm
 
         antiherm_err = np.linalg.norm(
-            tilde_f_terms[order] + tilde_f_terms[order].conj().T,
+            tilde_F_terms[order] + tilde_F_terms[order].conj().T,
             ord="fro",
         )
         if antiherm_err <= 1e-8:
             pair_coeffs, pair_terms, _ = pauli_decomposition(
-                tilde_f_terms[order],
+                tilde_F_terms[order],
                 basis,
                 antihermitian=True,
             )
@@ -266,39 +277,41 @@ def build_static_data(n, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
             non_pairable_orders.append((order, float(antiherm_err)))
 
     return {
-        "a_mat": a_mat,
-        "b_mat": b_mat,
+        "A_mat": A_mat,
+        "B_mat": B_mat,
         "basis": basis,
         "identity": identity,
-        "phi_terms": phi_terms,
-        "tilde_f_terms": tilde_f_terms,
+        "Phi_terms": Phi_terms,
+        "tilde_F_terms": tilde_F_terms,
         "phi_l1": phi_l1,
-        "tilde_f_l1": tilde_f_l1,
+        "tilde_F_l1": tilde_F_l1,
         "F_terms": F_terms,
-        "s_orders": list(range(kappa + 1, s0 + 1)),
+        "s_orders": list(range(K + 1, s0 + 1)),
         "pairable_orders": pairable_orders,
         "non_pairable_orders": non_pairable_orders,
-        "kappa": kappa,
+        "K": K,
+        "q0": q0,
         "s0": s0,
     }
 
 
-def build_tilde_v(static, t_total, r, deterministic_bias_cache=None):
+def build_tilde_V(static, t_total, r, validation_tol=1e-10):
     """Build tilde_V and the associated deterministic bias data for one step size."""
-    a_mat = static["a_mat"]
-    b_mat = static["b_mat"]
+    A_mat = static["A_mat"]
+    B_mat = static["B_mat"]
     identity = static["identity"]
     s_orders = static["s_orders"]
     F_terms = static["F_terms"]
-    kappa = static["kappa"]
+    tilde_F_terms = static["tilde_F_terms"]
+    K = static["K"]
 
     t = t_total / r
-    s1 = expm(-1j * b_mat * t) @ expm(-1j * a_mat * t)
-    u_exact = expm(-1j * (a_mat + b_mat) * t_total)
+    s1 = expm(-1j * B_mat * t) @ expm(-1j * A_mat * t)
+    U_exact = expm(-1j * (A_mat + B_mat) * t_total)
 
     eta = {order: F_terms[order]["l1_norm"] * (t**order) for order in s_orders}
-    leading_orders = [s for s in s_orders if s <= 2 * kappa + 1]
-    tail_orders = [s for s in s_orders if s > 2 * kappa + 1]
+    leading_orders = [s for s in s_orders if s <= 2 * K + 1]
+    tail_orders = [s for s in s_orders if s > 2 * K + 1]
     # eta_sum = eta_2 + eta_3
     eta_pair_sum = sum(eta[s] for s in leading_orders)
     # sqrt(1 + eta_sum^2) is the normalization factor for the pair compensation term, which is the dominant contribution to tilde_V when eta_sum is large.
@@ -310,7 +323,7 @@ def build_tilde_v(static, t_total, r, deterministic_bias_cache=None):
     for s in tail_orders:
         raw_weights[s] = eta[s]
 
-    tilde_v = np.zeros_like(identity)
+    tilde_V = np.zeros_like(identity)
     for order in s_orders:
         F_term = F_terms[order]
         weight = raw_weights[order]
@@ -318,27 +331,31 @@ def build_tilde_v(static, t_total, r, deterministic_bias_cache=None):
         for prob, coeff, pauli in zip(probs, F_term["coeffs"], F_term["terms"]):
             if F_term["kind"] == "pair":
                 phase = coeff / (1j * abs(coeff))
-                w_mat = phase * pauli
-                tilde_v += weight * prob * ((identity + 1j * eta_pair_sum * w_mat) / pair_scale)
+                W_mat = phase * pauli
+                tilde_V += weight * prob * ((identity + 1j * eta_pair_sum * W_mat) / pair_scale)
             else:
-                tilde_v += weight * prob * (coeff / abs(coeff) * pauli)
+                tilde_V += weight * prob * (coeff / abs(coeff) * pauli)
+
+    # another way to compute tilde_V to check consistency
+    tilde_V_taylor = identity.copy()
+    for order in s_orders:
+        tilde_V_taylor += tilde_F_terms[order] * (t**order)
+    validation_error = float(np.linalg.norm(tilde_V - tilde_V_taylor, 2))
+    if validation_error > validation_tol:
+        raise ValueError(f"tilde_V mismatch between compensation sum and Taylor sum: {validation_error:.3e}")
 
     # This is the total deterministic bias for r repeated compensated steps,
     # not the single-step tilde_V object built above.
-    deterministic = np.linalg.matrix_power(tilde_v @ s1, r)
-    if deterministic_bias_cache is not None:
-        if r not in deterministic_bias_cache:
-            deterministic_bias_cache[r] = float(np.linalg.norm(deterministic - u_exact, 2))
-        deterministic_bias = deterministic_bias_cache[r]
-    else:
-        deterministic_bias = float(np.linalg.norm(deterministic - u_exact, 2))
+    deterministic = np.linalg.matrix_power(tilde_V @ s1, r)
+    deterministic_bias = float(np.linalg.norm(deterministic - U_exact, 2))
 
     return {
-        "tilde_v": tilde_v,
+        "tilde_V": tilde_V,
         "s1": s1,
-        "u_exact": u_exact,
+        "U_exact": U_exact,
         "deterministic": deterministic,
         "deterministic_bias": deterministic_bias,
+        "validation_error": validation_error,
         "eta": eta,
         "eta_pair_sum": eta_pair_sum,
         "pair_scale": pair_scale,
@@ -359,15 +376,21 @@ def main():
 
     print("time step:", t)
 
-    # q0/s0 and convergence checks from NCC_with_log_precision.pdf
     k_local = 2
     g = 2 * (j + h)
     a_max = 1.0
-    kappa = 1
+    K = 1
+    if K == 1:
+        kappa = 1
+    else:
+        kappa = 2 * (5 ** (np.ceil(K / 2) - 1))
+
+    # q0/s0 and convergence checks from NCC_with_log_precision.pdf
     coeff = a_max * kappa + 1
-    q0 = int(np.ceil(np.log(4 * n / epsilon)))
     s0 = int(np.ceil(np.log(4 / epsilon))) if args.s0 <= 0 else args.s0
     s0 = max(3, s0)
+    q0 = int(np.ceil(np.log(4 * n / epsilon))) if args.q0 <= 0 else args.q0
+    q0 = max(q0, s0)
     lambda_comm = 4 * coeff * q0 * k_local * g * (2 * n) ** (1 / 2)
 
     cond_bch_truncation = 8 * math.e * k_local * q0 * coeff * g * t
@@ -376,41 +399,45 @@ def main():
     print("Lemma 3 condition 8e(a_max*kappa+1)q0kg t <= 1:", cond_bch_truncation)
     print("Lemma 5 condition e*lambda_comm*t <= 1:", cond_finite_s_truncation)
 
-    static = build_static_data(n, epsilon, j=j, h=h, kappa=kappa, s0=s0)
-    step_data = build_tilde_v(static, t_total, r)
-    a_mat = static["a_mat"]
-    b_mat = static["b_mat"]
-    phi_terms = static["phi_terms"]
-    tilde_f_terms = static["tilde_f_terms"]
+    static = build_static_data(n, epsilon, j=j, h=h, K=K, q0=q0, s0=s0)
+    evolution_data = build_tilde_V(static, t_total, r)
+    A_mat = static["A_mat"]
+    B_mat = static["B_mat"]
+    identity = static["identity"]
+    Phi_terms = static["Phi_terms"]
+    tilde_F_terms = static["tilde_F_terms"]
     phi_l1 = static["phi_l1"]
-    tilde_f_l1 = static["tilde_f_l1"]
+    tilde_F_l1 = static["tilde_F_l1"]
     F_terms = static["F_terms"]
     s_orders = static["s_orders"]
     pairable_orders = static["pairable_orders"]
     non_pairable_orders = static["non_pairable_orders"]
-    s1 = step_data["s1"]
-    tilde_v = step_data["tilde_v"]
-    u_exact = step_data["u_exact"]
-    eta = step_data["eta"]
-    eta_pair_sum = step_data["eta_pair_sum"]
-    raw_weights = step_data["raw_weights"]
-    v_exact = expm(-1j * (a_mat + b_mat) * t) @ expm(1j * a_mat * t) @ expm(1j * b_mat * t)
+    s1 = evolution_data["s1"]
+    tilde_V = evolution_data["tilde_V"]
+    U_exact = evolution_data["U_exact"]
+    eta = evolution_data["eta"]
+    eta_pair_sum = evolution_data["eta_pair_sum"]
+    raw_weights = evolution_data["raw_weights"]
+    V_exact = expm(-1j * (A_mat + B_mat) * t) @ expm(1j * A_mat * t) @ expm(1j * B_mat * t)
+
     print("Phi extraction method:", "direct BCH commutator formula")
     raw_total = float(sum(raw_weights.values()))
     p_order = np.array([raw_weights[s] / raw_total for s in s_orders], dtype=float)
+
     print("eta_pair_sum:", eta_pair_sum)
     print("eta by order:", {s: eta[s] for s in s_orders})
     print("Phi_q l1:", {s: phi_l1[s] for s in s_orders})
-    print("tilde_F Pauli-l1:", {s: tilde_f_l1[s] for s in s_orders})
+    print("tilde_F Pauli-l1:", {s: tilde_F_l1[s] for s in s_orders})
     print("mixed raw weights:", {s: raw_weights[s] for s in s_orders})
     print("Euler-pairable orders:", pairable_orders)
     if non_pairable_orders:
         print("non-pairable orders (anti-Hermitian defect):", non_pairable_orders)
+    print("tilde_V compensation-vs-Taylor check:", evolution_data["validation_error"])
 
     rng = np.random.default_rng(seed=7)
 
     def sample_Pauli_then_compensate_exp(order, atol=1e-10):
-        """Sample one component from F_terms and keep the pre-pairing linear form."""
+        """Sample one complete compensation component, including the raw-weight sum."""
         F_term = F_terms[order]
         terms = F_term["terms"]
         probs = np.abs(F_term["coeffs"]) / F_term["l1_norm"]
@@ -419,39 +446,32 @@ def main():
         pauli = terms[idx]
         if F_term["kind"] == "pair":
             phase = coeff / (1j * abs(coeff))
-            w_mat = phase * pauli
-            hermitian_err = np.linalg.norm(w_mat - w_mat.conj().T, ord="fro")
+            W_mat = phase * pauli
+            hermitian_err = np.linalg.norm(W_mat - W_mat.conj().T, ord="fro")
             if hermitian_err > atol:
                 raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
-            return (static["identity"] + 1j * eta_pair_sum * w_mat) / step_data["pair_scale"]
-        return coeff / abs(coeff) * pauli
 
-    def tilde_V_taylor():
-        """The cache use probability to calculate expectation, here we directly calculate tilde_V as expectation."""
-        tilde_v = np.eye(2**n, dtype=complex)
-        for order in s_orders:
-            tilde_v += tilde_f_terms[order] * (t**order)
-        return tilde_v
-
-    tilde_v_taylor = tilde_V_taylor()
-    print("tilde_V compensate-vs-Taylor:", np.linalg.norm(tilde_v - tilde_v_taylor, 2))
+            # apply exp(i theta W), you must multiply total 1-norm raw_total.
+            return raw_total * ((identity + 1j * eta_pair_sum * W_mat) / evolution_data["pair_scale"])
+        # apply W like (1+i)X, you must multiply total 1-norm raw_total.
+        return raw_total * (coeff / abs(coeff) * pauli)
 
     # Sampling start here
     def NCC_sampling(num_trials):
         v_list = []
         for _ in tqdm(range(num_trials), desc="single step trials"):
             order = int(rng.choice(s_orders, p=p_order))
-            v_list.append(raw_total * sample_Pauli_then_compensate_exp(order))
+            v_list.append(sample_Pauli_then_compensate_exp(order))
         v_average = sum(v_list) / num_trials
         return v_list, v_average
 
-    single_step_error_before = np.linalg.norm(s1 - expm(-1j * (a_mat + b_mat) * t), 2)
+    single_step_error_before = np.linalg.norm(s1 - expm(-1j * (A_mat + B_mat) * t), 2)
     print("single-step error before:", single_step_error_before)
 
-    v_list, v_avg = NCC_sampling(trials)
-    single_step_fluctuation = np.linalg.norm(v_avg - tilde_v, 2)
-    single_step_sample_error = np.linalg.norm(v_avg - v_exact, 2)
-    single_step_expectation_bias = np.linalg.norm(tilde_v - v_exact, 2)
+    V_list, V_avg = NCC_sampling(trials)
+    single_step_fluctuation = np.linalg.norm(V_avg - tilde_V, 2)
+    single_step_sample_error = np.linalg.norm(V_avg - V_exact, 2)
+    single_step_expectation_bias = np.linalg.norm(tilde_V - V_exact, 2)
 
     print("single-step sample error after compensation:", single_step_sample_error)
     print("single-step sample fluctuation:", single_step_fluctuation)
@@ -463,40 +483,39 @@ def main():
             evo = np.eye(2**n, dtype=complex)
             for _ in range(r):
                 order = int(rng.choice(s_orders, p=p_order))
-                evo = (raw_total * sample_Pauli_then_compensate_exp(order)) @ s1 @ evo
+                evo = sample_Pauli_then_compensate_exp(order) @ s1 @ evo
             evo_list.append(evo)
         evo_average = sum(evo_list) / num_trials
         return evo_list, evo_average
 
-    total_error_before = np.linalg.norm(np.linalg.matrix_power(s1, r) - u_exact, 2)
+    total_error_before = np.linalg.norm(np.linalg.matrix_power(s1, r) - U_exact, 2)
     print("total error before:", total_error_before)
 
     evo_list, evo_avg = multi_step_NCC_sampling(trials)
 
-    total_sample_fluctuation = np.linalg.norm(evo_avg - step_data["deterministic"], 2)
-    total_sample_error = np.linalg.norm(evo_avg - u_exact, 2)
-    total_expectation_bias = step_data["deterministic_bias"]
+    total_sample_fluctuation = np.linalg.norm(evo_avg - evolution_data["deterministic"], 2)
+    total_sample_error = np.linalg.norm(evo_avg - U_exact, 2)
+    total_expectation_bias = evolution_data["deterministic_bias"]
 
     print("multi-step sample error after compensation:", total_sample_error)
     print("multi-step sample fluctuation:", total_sample_fluctuation)
     print("multi-step expectation bias:", total_expectation_bias)
 
-    data_dir = Path("data_local_unitary_list")
+    data_dir = Path("data/no_search")
     data_dir.mkdir(parents=True, exist_ok=True)
     out = data_dir / f"results_log_weighted_trials{trials}_s0{s0}.npz"
     np.savez(
         out,
-        A=a_mat,
-        B=b_mat,
+        A=A_mat,
+        B=B_mat,
         S=s1,
-        V_tilde=tilde_v,
-        V_tilde_taylor=tilde_v_taylor,
-        V_exact=v_exact,
-        V_average=v_avg,
+        V_tilde=tilde_V,
+        V_exact=V_exact,
+        V_average=V_avg,
         evolution_average=evo_avg,
-        phi_orders=np.array(s_orders, dtype=int),
-        phi_matrices=np.stack([phi_terms[s] for s in s_orders]),
-        tilde_f_matrices=np.stack([tilde_f_terms[s] for s in s_orders]),
+        orders=np.array(s_orders, dtype=int),
+        phi_matrices=np.stack([Phi_terms[s] for s in s_orders]),
+        tilde_F_matrices=np.stack([tilde_F_terms[s] for s in s_orders]),
         single_step_error_before=single_step_error_before,
         single_step_sample_error=single_step_sample_error,
         single_step_fluctuation=single_step_fluctuation,
@@ -516,7 +535,6 @@ def main():
         s0=s0,
         eta_sum=eta_pair_sum,
         raw_total=raw_total,
-        sampling="weighted",
         cond_bch_truncation=cond_bch_truncation,
         cond_finite_s_truncation=cond_finite_s_truncation,
     )

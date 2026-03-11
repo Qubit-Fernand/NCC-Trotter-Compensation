@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from NCC_original import build_static_data, build_tilde_v
+from NCC_original import build_static_data, build_tilde_V
 
 
 def build_parser():
@@ -50,11 +50,14 @@ def sample_Pauli_then_compensate_exp(
         coeff = static["c2_coeffs"][idx]
         pauli = static["c2_terms"][idx]
     sign = coeff / (1j * abs(coeff))
-    w_mat = sign * pauli
-    hermitian_err = np.linalg.norm(w_mat - w_mat.conj().T, ord="fro")
+    W_mat = sign * pauli
+    hermitian_err = np.linalg.norm(W_mat - W_mat.conj().T, ord="fro")
     if hermitian_err > atol:
         raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
-    return static["identity"] + 1j * eta_sum * w_mat
+    # apply exp(i theta W), you must multiply total 1-norm \sqrt{1+eta_sum^2}.
+    # numerically we equivalently apply the term before pairing,
+    # which is equivalent to 1-norm * (I + i eta_sum W / 1-norm) = I + i eta_sum W
+    return static["identity"] + 1j * eta_sum * W_mat
 
 
 def estimate_total_sample_error(
@@ -77,7 +80,7 @@ def estimate_total_sample_error(
     evo_average /= trials
 
     return {
-        "sample_error": float(np.linalg.norm(evo_average - evolution_data["u_exact"], 2)),
+        "sample_error": float(np.linalg.norm(evo_average - evolution_data["U_exact"], 2)),
         "sample_fluctuation": float(np.linalg.norm(evo_average - evolution_data["deterministic"], 2)),
         "expectation_bias": expectation_bias,
         "t": float(evolution_data["t"]),
@@ -189,7 +192,7 @@ def search_r_min(
         def evaluate_at_r(r: int) -> dict:
             if metric_key == "expectation_bias":
                 if r not in evolution_cache:
-                    evolution_cache[r] = build_tilde_v(static, t_total, r)
+                    evolution_cache[r] = build_tilde_V(static, t_total, r)
                 return {"expectation_bias": evolution_cache[r]["deterministic_bias"]}
 
             elif metric_key == "sample_error":
@@ -197,7 +200,7 @@ def search_r_min(
                     return result_cache[r]
                 seed = make_search_seed(base_seed, repetition, r)
                 if r not in evolution_cache:
-                    evolution_cache[r] = build_tilde_v(static, t_total, r)
+                    evolution_cache[r] = build_tilde_V(static, t_total, r)
                 evolution_data = evolution_cache[r]
                 result = estimate_total_sample_error(
                     static=static,
