@@ -2,30 +2,12 @@ import argparse
 import json
 import math
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from scipy.linalg import expm
 from tqdm import tqdm
 
-from NCC_original import build_periodic_ab, commutator, pauli_basis, pauli_decomposition
-
-
-@dataclass
-class OriginalStaticData:
-    n: int
-    a_mat: np.ndarray
-    b_mat: np.ndarray
-    basis: list[np.ndarray]
-    c1_coeffs: np.ndarray
-    c1_terms: list[np.ndarray]
-    c1_l1: float
-    c2_coeffs: np.ndarray
-    c2_terms: list[np.ndarray]
-    c2_l1: float
-    identity: np.ndarray
-    h_total: np.ndarray
+from NCC_original import build_static_data, build_tilde_v
 
 
 def build_parser():
@@ -41,7 +23,7 @@ def build_parser():
     parser.add_argument("--repeats", type=int, default=10, help="number of repeated r_min searches")
     parser.add_argument("--seed", type=int, default=7, help="base RNG seed")
     parser.add_argument("--r-max", type=int, default=512, help="maximal r allowed during search")
-    parser.add_argument("--save-every-eval", action="store_true", help="checkpoint after every sampled r evaluation")
+    parser.add_argument("--save-every-search", action="store_true", help="checkpoint after every sampled r search step")
     return parser
 
 
@@ -49,115 +31,63 @@ def parse_args(argv=None):
     return build_parser().parse_args(argv)
 
 
-def build_static_data(n: int, j: float, h: float) -> OriginalStaticData:
-    a_mat, b_mat = build_periodic_ab(n, j, h)
-    basis = pauli_basis(n)
-    c1 = commutator(b_mat, a_mat)
-    c2 = 1j * (2 * commutator(b_mat, commutator(a_mat, b_mat)) + commutator(a_mat, commutator(a_mat, b_mat)))
-    c1_coeffs, c1_terms, c1_l1 = pauli_decomposition(c1, basis, antihermitian=True)
-    c2_coeffs, c2_terms, c2_l1 = pauli_decomposition(c2, basis, antihermitian=True)
-    dim = 2**n
-    return OriginalStaticData(
-        n=n,
-        a_mat=a_mat,
-        b_mat=b_mat,
-        basis=basis,
-        c1_coeffs=c1_coeffs,
-        c1_terms=c1_terms,
-        c1_l1=c1_l1,
-        c2_coeffs=c2_coeffs,
-        c2_terms=c2_terms,
-        c2_l1=c2_l1,
-        identity=np.eye(dim, dtype=complex),
-        h_total=a_mat + b_mat,
-    )
-
-
-def build_step_data(static: OriginalStaticData, t_total: float, r: int):
-    t = t_total / r
-    eta2 = static.c1_l1 * (t**2) / 2
-    eta3 = static.c2_l1 * (t**3) / 6
-    eta_sum = eta2 + eta3
-    if eta_sum <= 0:
-        raise ValueError("eta_sum must be positive")
-    p_s = np.array([eta2 / eta_sum, eta3 / eta_sum], dtype=float)
-    s1 = expm(-1j * static.b_mat * t) @ expm(-1j * static.a_mat * t)
-    u_exact = expm(-1j * static.h_total * t_total)
-
-    tilde_v = np.zeros_like(static.identity)
-    for weight, coeffs, terms, l1_norm in (
-        (p_s[0], static.c1_coeffs, static.c1_terms, static.c1_l1),
-        (p_s[1], static.c2_coeffs, static.c2_terms, static.c2_l1),
-    ):
-        probs = np.abs(coeffs) / l1_norm
-        for prob, coeff, pauli in zip(probs, coeffs, terms):
-            sign = coeff / (1j * abs(coeff))
-            w_mat = sign * pauli
-            tilde_v += weight * prob * (static.identity + 1j * eta_sum * w_mat)
-
-    return {
-        "t": t,
-        "p_s": p_s,
-        "eta_sum": eta_sum,
-        "eta2": eta2,
-        "eta3": eta3,
-        "s1": s1,
-        "u_exact": u_exact,
-        "tilde_v": tilde_v,
-    }
-
-
 def sample_Pauli_then_compensate_exp(
     rng: np.random.Generator,
-    static: OriginalStaticData,
+    static: dict,
     p_s: np.ndarray,
     eta_sum: float,
     atol: float = 1e-10,
 ) -> np.ndarray:
     order = int(rng.choice(2, p=p_s))
     if order == 0:
-        probs = np.abs(static.c1_coeffs) / static.c1_l1
-        idx = int(rng.choice(len(static.c1_terms), p=probs))
-        coeff = static.c1_coeffs[idx]
-        pauli = static.c1_terms[idx]
+        probs = np.abs(static["c1_coeffs"]) / static["c1_l1"]
+        idx = int(rng.choice(len(static["c1_terms"]), p=probs))
+        coeff = static["c1_coeffs"][idx]
+        pauli = static["c1_terms"][idx]
     else:
-        probs = np.abs(static.c2_coeffs) / static.c2_l1
-        idx = int(rng.choice(len(static.c2_terms), p=probs))
-        coeff = static.c2_coeffs[idx]
-        pauli = static.c2_terms[idx]
+        probs = np.abs(static["c2_coeffs"]) / static["c2_l1"]
+        idx = int(rng.choice(len(static["c2_terms"]), p=probs))
+        coeff = static["c2_coeffs"][idx]
+        pauli = static["c2_terms"][idx]
     sign = coeff / (1j * abs(coeff))
     w_mat = sign * pauli
     hermitian_err = np.linalg.norm(w_mat - w_mat.conj().T, ord="fro")
     if hermitian_err > atol:
         raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
-    return static.identity + 1j * eta_sum * w_mat
+    return static["identity"] + 1j * eta_sum * w_mat
 
 
-def estimate_total_sample_error(static: OriginalStaticData, t_total: float, r: int, trials: int, seed: int):
-    step = build_step_data(static, t_total, r)
+def estimate_total_sample_error(
+    static: dict,
+    t_total: float,
+    r: int,
+    trials: int,
+    seed: int,
+    evolution_data: dict,
+    expectation_bias: float,
+):
+    """Estimate sampled total error for a fixed r using Monte Carlo trajectories."""
     rng = np.random.default_rng(seed)
-    evo_average = np.zeros_like(static.identity)
+    evo_average = np.zeros_like(static["identity"])
     for _ in tqdm(range(trials), desc=f"r={r}", leave=False, disable=not sys.stderr.isatty()):
-        evo = static.identity.copy()
+        evo = static["identity"].copy()
         for _ in range(r):
-            evo = sample_Pauli_then_compensate_exp(rng, static, step["p_s"], step["eta_sum"]) @ step["s1"] @ evo
+            evo = sample_Pauli_then_compensate_exp(rng, static, evolution_data["p_s"], evolution_data["eta_sum"]) @ evolution_data["s1"] @ evo
         evo_average += evo
     evo_average /= trials
 
-    deterministic = np.linalg.matrix_power(step["tilde_v"] @ step["s1"], r)
     return {
-        "sample_error": float(np.linalg.norm(evo_average - step["u_exact"], 2)),
-        "sample_fluctuation": float(np.linalg.norm(evo_average - deterministic, 2)),
-        "expectation_bias": float(np.linalg.norm(deterministic - step["u_exact"], 2)),
-        "t": float(step["t"]),
-        "theta": float("nan"),
-        "eta_sum": float(step["eta_sum"]),
-        "eta2": float(step["eta2"]),
-        "eta3": float(step["eta3"]),
+        "sample_error": float(np.linalg.norm(evo_average - evolution_data["u_exact"], 2)),
+        "sample_fluctuation": float(np.linalg.norm(evo_average - evolution_data["deterministic"], 2)),
+        "expectation_bias": expectation_bias,
+        "t": float(evolution_data["t"]),
+        "eta_sum": float(evolution_data["eta_sum"]),
+        "eta2": float(evolution_data["eta2"]),
+        "eta3": float(evolution_data["eta3"]),
     }
 
 
-def make_eval_seed(base_seed: int, repetition: int, r: int) -> int:
+def make_search_seed(base_seed: int, repetition: int, r: int) -> int:
     return base_seed + repetition * 100_003 + r * 1_009
 
 
@@ -171,9 +101,9 @@ def confidence_interval(values: np.ndarray) -> tuple[float, float, float]:
 
 
 def resolve_output_dir(base_out_dir: Path, tag: str) -> Path:
-    out_dir = base_out_dir / "smoke" if "smoke" in tag.lower() else base_out_dir
-    out_dir.mkdir(parents=True, exist_ok=True)
-    return out_dir
+    output_dir = base_out_dir / "smoke" if "smoke" in tag.lower() else base_out_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
 
 
 def normalized_tag_suffix(tag: str) -> str:
@@ -184,16 +114,37 @@ def normalized_tag_suffix(tag: str) -> str:
     return f"_{tag}"
 
 
-def sampling_out_base(args) -> Path:
+def sampling_output_path(args) -> Path:
     suffix = normalized_tag_suffix(args.tag)
-    out_dir = resolve_output_dir(args.out_dir, args.tag)
-    return out_dir / (f"NCC_original_sampling_r_N{args.N}_T{args.T:g}_eps{args.epsilon:g}_" f"trials{args.trials}_repeats{args.repeats}{suffix}")
+    output_dir = resolve_output_dir(args.out_dir, args.tag)
+    return output_dir / (f"NCC_original_sampling_r_N{args.N}_T{args.T:g}_eps{args.epsilon:g}_" f"trials{args.trials}_repeats{args.repeats}{suffix}")
 
 
-def save_sampling_checkpoint(out_base: Path, payload: dict):
-    json_path = Path(f"{out_base}.json")
-    npz_path = Path(f"{out_base}.npz")
+def grouped_search_array(payload: dict, key: str, fill_value, dtype):
+    grouped: dict[int, list] = {}
+    for item in payload["searches"]:
+        grouped.setdefault(int(item["repetition"]), []).append(item[key])
+    if not grouped:
+        return np.empty((0, 0), dtype=dtype), np.empty((0,), dtype=int)
+    reps = sorted(grouped)
+    lengths = np.array([len(grouped[rep]) for rep in reps], dtype=int)
+    width = int(lengths.max())
+    array = np.full((len(reps), width), fill_value, dtype=dtype)
+    for row, rep in enumerate(reps):
+        values = np.array(grouped[rep], dtype=dtype)
+        array[row, : len(values)] = values
+    return array, lengths
+
+
+def save_sampling_checkpoint(output_path: Path, payload: dict):
+    json_path = Path(f"{output_path}.json")
+    npz_path = Path(f"{output_path}.npz")
     json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+    searched_r, searched_lengths = grouped_search_array(payload, "r", -1, int)
+    searched_seed, _ = grouped_search_array(payload, "seed", -1, int)
+    searched_sample_error, _ = grouped_search_array(payload, "sample_error", np.nan, float)
+    searched_expectation_bias, _ = grouped_search_array(payload, "expectation_bias", np.nan, float)
+    searched_sample_fluctuation, _ = grouped_search_array(payload, "sample_fluctuation", np.nan, float)
     np.savez(
         npz_path,
         sampled_r_mins=np.array(payload["sampled_r_mins"], dtype=int),
@@ -203,58 +154,86 @@ def save_sampling_checkpoint(out_base: Path, payload: dict):
         sample_fluctuations=np.array(payload["sample_fluctuations"], dtype=float),
         low_bounds=np.array(payload["ci_low_history"], dtype=float),
         high_bounds=np.array(payload["ci_high_history"], dtype=float),
-        eval_repetition=np.array([item["repetition"] for item in payload["evaluations"]], dtype=int),
-        eval_r=np.array([item["r"] for item in payload["evaluations"]], dtype=int),
-        eval_seed=np.array([item["seed"] for item in payload["evaluations"]], dtype=int),
-        eval_sample_error=np.array([item["sample_error"] for item in payload["evaluations"]], dtype=float),
-        eval_expectation_bias=np.array([item["expectation_bias"] for item in payload["evaluations"]], dtype=float),
-        eval_sample_fluctuation=np.array([item["sample_fluctuation"] for item in payload["evaluations"]], dtype=float),
+        searched_repetition=np.array([item["repetition"] for item in payload["searches"]], dtype=int),
+        searched_lengths=searched_lengths,
+        searched_r=searched_r,
+        searched_seed=searched_seed,
+        searched_sample_error=searched_sample_error,
+        searched_expectation_bias=searched_expectation_bias,
+        searched_sample_fluctuation=searched_sample_fluctuation,
     )
 
 
-def find_r_min_sampling(
-    static: OriginalStaticData,
+"""Search start here"""
+
+
+def search_r_min(
+    static: dict,
     t_total: float,
     epsilon: float,
     trials: int,
     repetition: int,
     base_seed: int,
     r_max: int,
-    evaluations: list[dict],
+    searches: list[dict],
     progress_label: str,
     checkpoint_cb=None,
 ):
-    cache: dict[int, dict] = {}
+    """Search sampled and expected r_min while reusing cached search results."""
+    result_cache: dict[int, dict] = {}
+    evolution_cache: dict[int, dict] = {}
 
-    def evaluate(r: int):
-        if r in cache:
-            return cache[r]
-        seed = make_eval_seed(base_seed, repetition, r)
-        result = estimate_total_sample_error(static, t_total, r, trials, seed)
-        result["seed"] = seed
-        cache[r] = result
-        evaluations.append({"repetition": repetition, "r": r, **result})
-        print(
-            f"{progress_label} eval r={r}: sample_error={result['sample_error']:.6e}, " f"bias={result['expectation_bias']:.6e}, fluct={result['sample_fluctuation']:.6e}"
-        )
-        if checkpoint_cb is not None:
-            checkpoint_cb()
-        return result
+    def search_min_by(metric_key: str) -> tuple[int, dict]:
+        # Exponential search finds an upper bound; binary search then locates
+        # the smallest r whose chosen metric is below epsilon.
+        def evaluate_at_r(r: int) -> dict:
+            if metric_key == "expectation_bias":
+                if r not in evolution_cache:
+                    evolution_cache[r] = build_tilde_v(static, t_total, r)
+                return {"expectation_bias": evolution_cache[r]["deterministic_bias"]}
 
-    def find_min_by(metric_key: str) -> tuple[int, dict]:
+            elif metric_key == "sample_error":
+                if r in result_cache:
+                    return result_cache[r]
+                seed = make_search_seed(base_seed, repetition, r)
+                if r not in evolution_cache:
+                    evolution_cache[r] = build_tilde_v(static, t_total, r)
+                evolution_data = evolution_cache[r]
+                result = estimate_total_sample_error(
+                    static=static,
+                    t_total=t_total,
+                    r=r,
+                    trials=trials,
+                    seed=seed,
+                    evolution_data=evolution_data,
+                    expectation_bias=evolution_data["deterministic_bias"],
+                )
+                result["seed"] = seed
+                result_cache[r] = result
+                searches.append({"repetition": repetition, "r": r, **result})
+                print(
+                    f"{progress_label} eval r={r}: sample_error={result['sample_error']:.6e}, "
+                    f"bias={result['expectation_bias']:.6e}, fluct={result['sample_fluctuation']:.6e}"
+                )
+                if checkpoint_cb is not None:
+                    checkpoint_cb()
+                return result
+            else:
+                raise ValueError(f"unsupported metric_key={metric_key}")
+
         low = 0
         high = 1
-        high_eval = evaluate(high)
+        high_eval = evaluate_at_r(high)
         while high_eval[metric_key] > epsilon and high < r_max:
             low = high
             high *= 2
-            high_eval = evaluate(high)
+            high_eval = evaluate_at_r(high)
         if high_eval[metric_key] > epsilon:
             raise RuntimeError(f"failed to reach epsilon={epsilon} by r={r_max} for {metric_key}")
 
         while low + 1 < high:
             mid = (low + high) // 2
-            mid_eval = evaluate(mid)
+            mid_eval = evaluate_at_r(mid)
             if mid_eval[metric_key] <= epsilon:
                 high = mid
                 high_eval = mid_eval
@@ -262,15 +241,15 @@ def find_r_min_sampling(
                 low = mid
         return high, high_eval
 
-    sampled_r_min, sampled_eval = find_min_by("sample_error")
-    expected_r_min, _ = find_min_by("expectation_bias")
+    expected_r_min, _ = search_min_by("expectation_bias")
+    sampled_r_min, sampled_eval = search_min_by("sample_error")
     return sampled_r_min, sampled_eval, expected_r_min
 
 
 def main(argv=None):
     args = parse_args(argv)
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    out_base = sampling_out_base(args)
+    output_path = sampling_output_path(args)
     static = build_static_data(args.N, args.J, args.h)
     payload = {
         "script": "NCC_original_sampling_r.py",
@@ -292,10 +271,12 @@ def main(argv=None):
         "sample_fluctuations": [],
         "ci_low_history": [],
         "ci_high_history": [],
-        "evaluations": [],
+        "searches": [],
     }
 
     def checkpoint():
+        # Persist the partial payload so long runs can be resumed/reviewed even
+        # if the process stops mid-search.
         current = np.array(payload["sampled_r_mins"], dtype=float) if payload["sampled_r_mins"] else np.array([], dtype=float)
         if current.size > 0:
             _, low, high = confidence_interval(current)
@@ -303,11 +284,11 @@ def main(argv=None):
             low = high = float("nan")
         payload["ci_low_history"] = payload["ci_low_history"][: len(payload["sampled_r_mins"])]
         payload["ci_high_history"] = payload["ci_high_history"][: len(payload["sampled_r_mins"])]
-        save_sampling_checkpoint(out_base, payload)
+        save_sampling_checkpoint(output_path, payload)
 
     for repetition in range(args.repeats):
         label = f"[repeat {repetition + 1}/{args.repeats}]"
-        sampled_r_min, metrics, expected_r_min = find_r_min_sampling(
+        sampled_r_min, metrics, expected_r_min = search_r_min(
             static=static,
             t_total=args.T,
             epsilon=args.epsilon,
@@ -315,9 +296,9 @@ def main(argv=None):
             repetition=repetition,
             base_seed=args.seed,
             r_max=args.r_max,
-            evaluations=payload["evaluations"],
+            searches=payload["searches"],
             progress_label=label,
-            checkpoint_cb=checkpoint if args.save_every_eval else None,
+            checkpoint_cb=checkpoint if args.save_every_search else None,
         )
         payload["sampled_r_mins"].append(int(sampled_r_min))
         payload["expected_r_mins"].append(-1 if expected_r_min is None else int(expected_r_min))
@@ -327,7 +308,7 @@ def main(argv=None):
         _, ci_low, ci_high = confidence_interval(np.array(payload["sampled_r_mins"], dtype=float))
         payload["ci_low_history"].append(ci_low)
         payload["ci_high_history"].append(ci_high)
-        save_sampling_checkpoint(out_base, payload)
+        save_sampling_checkpoint(output_path, payload)
         print(
             f"{label} sampled_r_min={sampled_r_min}, expected_r_min={expected_r_min}, current mean={np.mean(payload['sampled_r_mins']):.3f}, "
             f"95% CI=[{ci_low:.3f}, {ci_high:.3f}]"
@@ -340,8 +321,8 @@ def main(argv=None):
     print(f"expected r_min samples: {payload['expected_r_mins']}")
     print(f"sampled r_min mean: {mean:.3f}")
     print(f"95% CI for sampled r_min mean: [{ci_low:.3f}, {ci_high:.3f}]")
-    print(f"saved checkpoint to: {Path(f'{out_base}.json')}")
-    print(f"saved arrays to: {Path(f'{out_base}.npz')}")
+    print(f"saved checkpoint to: {Path(f'{output_path}.json')}")
+    print(f"saved arrays to: {Path(f'{output_path}.npz')}")
 
 
 if __name__ == "__main__":

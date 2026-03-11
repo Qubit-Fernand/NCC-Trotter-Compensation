@@ -20,4 +20,5 @@ archive/
 data_local_unitary_list/
 notebook/
 data_Ising/
+# data/smoke/
 # /*.sh

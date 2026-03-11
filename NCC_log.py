@@ -283,8 +283,8 @@ def build_static_data(n, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
     }
 
 
-def build_tilde_v(static, t_total, r):
-    """Build the compensated single-step expectation operator tilde_V."""
+def build_tilde_v(static, t_total, r, deterministic_bias_cache=None):
+    """Build tilde_V and the associated deterministic bias data for one step size."""
     a_mat = static["a_mat"]
     b_mat = static["b_mat"]
     identity = static["identity"]
@@ -323,23 +323,27 @@ def build_tilde_v(static, t_total, r):
             else:
                 tilde_v += weight * prob * (coeff / abs(coeff) * pauli)
 
+    # This is the total deterministic bias for r repeated compensated steps,
+    # not the single-step tilde_V object built above.
+    deterministic = np.linalg.matrix_power(tilde_v @ s1, r)
+    if deterministic_bias_cache is not None:
+        if r not in deterministic_bias_cache:
+            deterministic_bias_cache[r] = float(np.linalg.norm(deterministic - u_exact, 2))
+        deterministic_bias = deterministic_bias_cache[r]
+    else:
+        deterministic_bias = float(np.linalg.norm(deterministic - u_exact, 2))
+
     return {
         "tilde_v": tilde_v,
         "s1": s1,
         "u_exact": u_exact,
+        "deterministic": deterministic,
+        "deterministic_bias": deterministic_bias,
         "eta": eta,
         "eta_pair_sum": eta_pair_sum,
         "pair_scale": pair_scale,
         "raw_weights": raw_weights,
     }
-
-
-@lru_cache(maxsize=None)
-def build_deterministic_bias(n, t_total, r, epsilon, j=1.0, h=1.0, kappa=1, s0=None):
-    """Return ||(tilde_V S_1)^r - U_exact||_2 for the deterministic expectation operator."""
-    static = build_static_data(n, epsilon, j=j, h=h, kappa=kappa, s0=s0)
-    data = build_tilde_v(static, t_total, r)
-    return np.linalg.norm(np.linalg.matrix_power(data["tilde_v"] @ data["s1"], r) - data["u_exact"], 2)
 
 
 def main():
@@ -469,9 +473,9 @@ def main():
 
     evo_list, evo_avg = multi_step_NCC_sampling(trials)
 
-    total_sample_fluctuation = np.linalg.norm(evo_avg - np.linalg.matrix_power(tilde_v @ s1, r), 2)
+    total_sample_fluctuation = np.linalg.norm(evo_avg - step_data["deterministic"], 2)
     total_sample_error = np.linalg.norm(evo_avg - u_exact, 2)
-    total_expectation_bias = np.linalg.norm(np.linalg.matrix_power(tilde_v @ s1, r) - u_exact, 2)
+    total_expectation_bias = step_data["deterministic_bias"]
 
     print("multi-step sample error after compensation:", total_sample_error)
     print("multi-step sample fluctuation:", total_sample_fluctuation)
@@ -510,7 +514,6 @@ def main():
         epsilon=epsilon,
         q0=q0,
         s0=s0,
-        theta=np.nan,
         eta_sum=eta_pair_sum,
         raw_total=raw_total,
         sampling="weighted",

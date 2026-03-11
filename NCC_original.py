@@ -4,6 +4,7 @@ We use the commutator results' Pauli expansion to pair into exp, unlike the laye
 """
 
 import argparse
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -16,7 +17,6 @@ X = np.array([[0, 1], [1, 0]])  # Pauli-X matrix
 Y = np.array([[0, -1j], [1j, 0]])  # Pauli-Y matrix
 Z = np.array([[1, 0], [0, -1]])  # Pauli-Z matrix
 I = np.eye(2)  # Identity matrix
-
 
 def commutator(A, B):
     """Compute the commutator [A, B] = AB - BA"""
@@ -99,6 +99,71 @@ def pauli_decomposition(matrix, basis, antihermitian=False, tol=1e-10):
     return coeffs, terms, l1_norm
 
 
+@lru_cache(maxsize=None)
+def build_static_data(n: int, j: float, h: float) -> dict:
+    a_mat, b_mat = build_periodic_ab(n, j, h)
+    basis = pauli_basis(n)
+    c1 = commutator(b_mat, a_mat)
+    c2 = 1j * (2 * commutator(b_mat, commutator(a_mat, b_mat)) + commutator(a_mat, commutator(a_mat, b_mat)))
+    c1_coeffs, c1_terms, c1_l1 = pauli_decomposition(c1, basis, antihermitian=True)
+    c2_coeffs, c2_terms, c2_l1 = pauli_decomposition(c2, basis, antihermitian=True)
+    dim = 2**n
+    return {
+        "n": n,
+        "a_mat": a_mat,
+        "b_mat": b_mat,
+        "basis": basis,
+        "c1_coeffs": c1_coeffs,
+        "c1_terms": c1_terms,
+        "c1_l1": c1_l1,
+        "c2_coeffs": c2_coeffs,
+        "c2_terms": c2_terms,
+        "c2_l1": c2_l1,
+        "identity": np.eye(dim, dtype=complex),
+        "h_total": a_mat + b_mat,
+    }
+
+
+def build_tilde_v(static, t_total: float, r: int):
+    """Build evolution data and deterministic bias for the original-NCC step."""
+    t = t_total / r
+    eta2 = static["c1_l1"] * (t**2) / 2
+    eta3 = static["c2_l1"] * (t**3) / 6
+    eta_sum = eta2 + eta3
+    if eta_sum <= 0:
+        raise ValueError("eta_sum must be positive")
+    p_s = np.array([eta2 / eta_sum, eta3 / eta_sum], dtype=float)
+    s1 = expm(-1j * static["b_mat"] * t) @ expm(-1j * static["a_mat"] * t)
+    u_exact = expm(-1j * static["h_total"] * t_total)
+
+    tilde_v = np.zeros_like(static["identity"])
+    for weight, coeffs, terms, l1_norm in (
+        (p_s[0], static["c1_coeffs"], static["c1_terms"], static["c1_l1"]),
+        (p_s[1], static["c2_coeffs"], static["c2_terms"], static["c2_l1"]),
+    ):
+        probs = np.abs(coeffs) / l1_norm
+        for prob, coeff, pauli in zip(probs, coeffs, terms):
+            sign = coeff / (1j * abs(coeff))
+            w_mat = sign * pauli
+            tilde_v += weight * prob * (static["identity"] + 1j * eta_sum * w_mat)
+
+    deterministic = np.linalg.matrix_power(tilde_v @ s1, r)
+    deterministic_bias = float(np.linalg.norm(deterministic - u_exact, 2))
+
+    return {
+        "t": t,
+        "p_s": p_s,
+        "eta_sum": eta_sum,
+        "eta2": eta2,
+        "eta3": eta3,
+        "s1": s1,
+        "u_exact": u_exact,
+        "tilde_v": tilde_v,
+        "deterministic": deterministic,
+        "deterministic_bias": deterministic_bias,
+    }
+
+
 def main():
     args = parse_args()
 
@@ -121,51 +186,46 @@ def main():
 
     print("time step:", t)
 
-    A, B = build_periodic_ab(N, J, h)
-    basis = pauli_basis(N)
+    static = build_static_data(N, J, h)
+    evolution_data = build_tilde_v(static, T, r)
+    A = static["a_mat"]
+    B = static["b_mat"]
 
     # note the order of exp(A) and exp(B)
-    S = expm(-1j * B * t) @ expm(-1j * A * t)
+    S = evolution_data["s1"]
+    tilde_v = evolution_data["tilde_v"]
     V_exact = expm(-1j * (A + B) * t) @ expm(1j * A * t) @ expm(1j * B * t)
 
-    C1 = commutator(B, A)
-    C2 = 1j * (2 * commutator(B, commutator(A, B)) + commutator(A, commutator(A, B)))
-    F_terms = {}
-    c1_coeffs, c1_terms, c1_l1 = pauli_decomposition(C1, basis, antihermitian=True)
-    c2_coeffs, c2_terms, c2_l1 = pauli_decomposition(C2, basis, antihermitian=True)
-    F_terms[2] = {"coeffs": c1_coeffs, "terms": c1_terms, "l1_norm": c1_l1}
-    F_terms[3] = {"coeffs": c2_coeffs, "terms": c2_terms, "l1_norm": c2_l1}
-
-    eta2 = c1_l1 * (t**2) / 2
-    eta3 = c2_l1 * (t**3) / 6
-    eta_sum = eta2 + eta3
-    p_s = [eta2 / eta_sum, eta3 / eta_sum]
-    theta = np.arctan(eta_sum)
-
-    print("C1 l1:", c1_l1)
-    print("C2 l1:", c2_l1)
-    print("C1/C2 Pauli terms:", len(c1_terms), len(c2_terms))
-    print("eta2, eta3:", eta2, eta3)
-    print("p_s:", p_s)
-    print("theta:", theta)
+    print("C1 l1:", static["c1_l1"])
+    print("C2 l1:", static["c2_l1"])
+    print("C1/C2 Pauli terms:", len(static["c1_terms"]), len(static["c2_terms"]))
+    print("eta2, eta3:", evolution_data["eta2"], evolution_data["eta3"])
+    print("p_s:", evolution_data["p_s"])
 
     S_r = np.eye(2**N, dtype=complex)
     for _ in range(r):
         S_r = S @ S_r
 
     evolution_exact = expm(-1j * (A + B) * t * r)
-    identity = np.eye(2**N, dtype=complex)
+    identity = static["identity"]
 
     def sample_Pauli_then_compensate_exp(rng, s, atol=1e-10):
         """Sample a Hermitian Pauli W from order-s commutator data"""
-        F_term = F_terms.get(s)
-        if F_term is None:
+        if s == 2:
+            coeffs = static["c1_coeffs"]
+            terms = static["c1_terms"]
+            l1_norm = static["c1_l1"]
+        elif s == 3:
+            coeffs = static["c2_coeffs"]
+            terms = static["c2_terms"]
+            l1_norm = static["c2_l1"]
+        else:
             raise ValueError(f"unsupported order s={s}")
-        probs = np.abs(F_term["coeffs"]) / F_term["l1_norm"]
-        idx = int(rng.choice(len(F_term["terms"]), p=probs))
+        probs = np.abs(coeffs) / l1_norm
+        idx = int(rng.choice(len(terms), p=probs))
         # For antiHermtian F_2 and F_3, the coeffs are purely imaginary, so W is Hermitian.
-        coeff = F_term["coeffs"][idx]
-        pauli = F_term["terms"][idx]
+        coeff = coeffs[idx]
+        pauli = terms[idx]
 
         # With prob, sample I + eta_sum * (\pm 1j) * pauli, note the sign
         sign = coeff / (1j * abs(coeff))
@@ -176,18 +236,10 @@ def main():
 
         # aim to apply exp(i theta W) * \sqrt{1+eta_sum^2}.
         # numerically we equivalently apply the term before pairing
-        return identity + 1j * eta_sum * w_mat
+        return identity + 1j * evolution_data["eta_sum"] * w_mat
 
     def tilde_V():
         """Expectation of single-step compensation unitary"""
-        tilde_v = np.zeros((2**N, 2**N), dtype=complex)
-        for s, p_order in zip([2, 3], p_s):
-            F_term = F_terms[s]
-            probs = np.abs(F_term["coeffs"]) / F_term["l1_norm"]
-            for p_pauli, coeff, pauli in zip(probs, F_term["coeffs"], F_term["terms"]):
-                sign = coeff / (1j * abs(coeff))
-                w_mat = sign * pauli
-                tilde_v += p_order * p_pauli * (identity + 1j * eta_sum * w_mat)
         return tilde_v
 
     # K = 1, sample from s = 2, 3
@@ -199,7 +251,7 @@ def main():
 
         V_list = []
         for _ in tqdm(range(trials), desc="single step trails"):
-            s = int(rng.choice(s_list, p=p_s))
+            s = int(rng.choice(s_list, p=evolution_data["p_s"]))
             V_list.append(sample_Pauli_then_compensate_exp(rng, s))
 
         V_average = sum(V_list) / trials
@@ -229,7 +281,7 @@ def main():
         for _ in tqdm(range(trials), desc="multi step trials"):
             evolution = np.eye(2**N, dtype=complex)
             for _ in range(r):
-                s = int(rng.choice(s_list, p=p_s))
+                s = int(rng.choice(s_list, p=evolution_data["p_s"]))
                 evolution = sample_Pauli_then_compensate_exp(rng, s) @ S @ evolution
 
             evolution_list.append(evolution)
@@ -243,8 +295,8 @@ def main():
 
     evolution_list, evolution_average = multi_step_NCC_sampling(trials=args.trials)
     total_error_after = np.linalg.norm(evolution_average - evolution_exact, 2)
-    total_fluctuation = np.linalg.norm(evolution_average - np.linalg.matrix_power(tilde_v @ S, r), 2)
-    total_bias = np.linalg.norm(np.linalg.matrix_power(tilde_v @ S, r) - evolution_exact, 2)
+    total_fluctuation = np.linalg.norm(evolution_average - evolution_data["deterministic"], 2)
+    total_bias = evolution_data["deterministic_bias"]
 
     print("total evolution error after compensation:\n", total_error_after)
     print("total evolution fluctuation:\n", total_fluctuation)
