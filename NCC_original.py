@@ -35,6 +35,11 @@ def parse_args():
     parser.add_argument("--T", type=float, default=1.0, help="evolution time")
     parser.add_argument("--r", type=int, default=20, help="Trotter steps")
     parser.add_argument("--trials", type=int, default=1000, help="NCC trials")
+    parser.add_argument(
+        "--save_trials_list",
+        action="store_true",
+        help="store per-trial sampled matrices V_list and U_total_list in memory and output npz",
+    )
     return parser.parse_args()
 
 
@@ -255,12 +260,16 @@ def main():
         # NCC sampling
         s_list = [2, 3]
 
-        V_list = []
-        for _ in tqdm(range(trials), desc="single step trails"):
+        V_list = [] if args.save_trials_list else None
+        V_average = np.zeros_like(identity)
+        for _ in tqdm(range(trials), desc="single step trials"):
             s = int(rng.choice(s_list, p=evolution_data["p_s"]))
-            V_list.append(sample_Pauli_then_compensate_exp(rng, s))
+            sample = sample_Pauli_then_compensate_exp(rng, s)
+            V_average += sample
+            if V_list is not None:
+                V_list.append(sample)
 
-        V_average = sum(V_list) / trials
+        V_average /= trials
 
         return V_list, V_average
 
@@ -282,25 +291,28 @@ def main():
         # NCC sampling
         s_list = [2, 3]
 
-        evolution_list = []
+        U_total_list = [] if args.save_trials_list else None
+        U_total_average = np.zeros_like(identity)
         for _ in tqdm(range(trials), desc="multi step trials"):
             evolution = identity.copy()
             for _ in range(r):
                 s = int(rng.choice(s_list, p=evolution_data["p_s"]))
                 evolution = sample_Pauli_then_compensate_exp(rng, s) @ S @ evolution
 
-            evolution_list.append(evolution)
+            U_total_average += evolution
+            if U_total_list is not None:
+                U_total_list.append(evolution)
 
-        evolution_average = sum(evolution_list) / trials
+        U_total_average /= trials
 
-        return evolution_list, evolution_average
+        return U_total_list, U_total_average
 
     total_error_before = np.linalg.norm(S_r - evolution_exact, 2)
     print("total evolution error before compensation:\n", total_error_before)
 
-    evolution_list, evolution_average = multi_step_NCC_sampling(trials=args.trials)
-    total_error_after = np.linalg.norm(evolution_average - evolution_exact, 2)
-    total_fluctuation = np.linalg.norm(evolution_average - evolution_data["deterministic"], 2)
+    U_total_list, U_total_average = multi_step_NCC_sampling(trials=args.trials)
+    total_error_after = np.linalg.norm(U_total_average - evolution_exact, 2)
+    total_fluctuation = np.linalg.norm(U_total_average - evolution_data["deterministic"], 2)
     total_bias = evolution_data["deterministic_bias"]
 
     print("total evolution error after compensation:\n", total_error_after)
@@ -311,17 +323,14 @@ def main():
     data_dir.mkdir(parents=True, exist_ok=True)
     output_path = data_dir / f"NCC_original_trials{args.trials}_N{args.N}_r{args.r}.npz"
     print("saving results to:", output_path)
-    np.savez(
-        output_path,
+    output_payload = dict(
         A=A,
         B=B,
         S=S,
         V_tilde=tilde_V,
         V_exact=V_exact,
         V_average=V_average,
-        V_list=np.stack(V_list),
-        evolution_average=evolution_average,
-        evolution_list=np.stack(evolution_list),
+        U_total_average=U_total_average,
         single_step_error_before=single_step_error_before,
         single_step_error_after=single_step_error_after,
         single_step_fluctuation=single_step_fluctuation,
@@ -336,7 +345,12 @@ def main():
         T=T,
         r=r,
         trials=args.trials,
+        save_trials_list=args.save_trials_list,
     )
+    if args.save_trials_list:
+        output_payload["V_list"] = np.stack(V_list)
+        output_payload["U_total_list"] = np.stack(U_total_list)
+    np.savez(output_path, **output_payload)
 
 
 if __name__ == "__main__":

@@ -27,7 +27,12 @@ def parse_args():
     parser.add_argument("--h", type=float, default=1.0, help="field strength")
     parser.add_argument("--T", type=float, default=1.0, help="total evolution time")
     parser.add_argument("--r", type=int, default=20, help="number of Trotter segments")
-    parser.add_argument("--trials", type=int, default=2000, help="Monte Carlo trials")
+    parser.add_argument("--trials", type=int, default=1000, help="Monte Carlo trials")
+    parser.add_argument(
+        "--save_trials_list",
+        action="store_true",
+        help="store per-trial sampled matrices V_list and U_total_list in memory and output npz",
+    )
     parser.add_argument("--epsilon", type=float, default=0.01, help="target precision")
     parser.add_argument(
         "--s0",
@@ -451,12 +456,16 @@ def main():
 
     # Sampling start here
     def NCC_sampling(num_trials):
-        v_list = []
+        V_list = [] if args.save_trials_list else None
+        v_average = np.zeros_like(identity)
         for _ in tqdm(range(num_trials), desc="single step trials"):
             order = int(rng.choice(s_orders, p=p_order))
-            v_list.append(sample_Pauli_then_compensate_exp(order))
-        v_average = sum(v_list) / num_trials
-        return v_list, v_average
+            sample = sample_Pauli_then_compensate_exp(order)
+            v_average += sample
+            if V_list is not None:
+                V_list.append(sample)
+        v_average /= num_trials
+        return V_list, v_average
 
     single_step_error_before = np.linalg.norm(s1 - expm(-1j * (A_mat + B_mat) * t), 2)
     print("single-step error before:", single_step_error_before)
@@ -471,20 +480,23 @@ def main():
     print("single-step expectation bias:", single_step_expectation_bias)
 
     def multi_step_NCC_sampling(num_trials):
-        evo_list = []
+        U_total_list = [] if args.save_trials_list else None
+        U_total_average = np.zeros_like(identity)
         for _ in tqdm(range(num_trials), desc="multi step trials"):
             evo = np.eye(2**n, dtype=complex)
             for _ in range(r):
                 order = int(rng.choice(s_orders, p=p_order))
                 evo = sample_Pauli_then_compensate_exp(order) @ s1 @ evo
-            evo_list.append(evo)
-        evo_average = sum(evo_list) / num_trials
-        return evo_list, evo_average
+            U_total_average += evo
+            if U_total_list is not None:
+                U_total_list.append(evo)
+        U_total_average /= num_trials
+        return U_total_list, U_total_average
 
     total_error_before = np.linalg.norm(np.linalg.matrix_power(s1, r) - U_exact, 2)
     print("total error before:", total_error_before)
 
-    evo_list, evo_avg = multi_step_NCC_sampling(trials)
+    U_total_list, evo_avg = multi_step_NCC_sampling(trials)
 
     total_sample_fluctuation = np.linalg.norm(evo_avg - evolution_data["deterministic"], 2)
     total_sample_error = np.linalg.norm(evo_avg - U_exact, 2)
@@ -497,15 +509,14 @@ def main():
     data_dir = Path("data/no_search")
     data_dir.mkdir(parents=True, exist_ok=True)
     out = data_dir / f"results_log_weighted_trials{trials}_s0{s0}.npz"
-    np.savez(
-        out,
+    output_payload = dict(
         A=A_mat,
         B=B_mat,
         S=s1,
         V_tilde=tilde_V,
         V_exact=V_exact,
         V_average=V_avg,
-        evolution_average=evo_avg,
+        U_total_average=evo_avg,
         orders=np.array(s_orders, dtype=int),
         phi_matrices=np.stack([Phi_terms[s] for s in s_orders]),
         tilde_F_matrices=np.stack([tilde_F_terms[s] for s in s_orders]),
@@ -530,7 +541,12 @@ def main():
         raw_total=raw_total,
         cond_bch_truncation=cond_bch_truncation,
         cond_finite_s_truncation=cond_finite_s_truncation,
+        save_trials_list=args.save_trials_list,
     )
+    if args.save_trials_list:
+        output_payload["V_list"] = np.stack(V_list)
+        output_payload["U_total_list"] = np.stack(U_total_list)
+    np.savez(out, **output_payload)
     print("saving results to:", out)
 
 

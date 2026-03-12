@@ -76,17 +76,17 @@ def estimate_total_sample_error(
 ):
     """Estimate sampled total error for a fixed r using Monte Carlo trajectories."""
     rng = np.random.default_rng(seed)
-    evo_average = np.zeros_like(static["identity"])
+    U_total_average = np.zeros_like(static["identity"])
     for _ in tqdm(range(trials), desc=f"r={r}", leave=False, disable=not sys.stderr.isatty()):
         evo = static["identity"].copy()
         for _ in range(r):
             evo = sample_Pauli_then_compensate_exp(rng, static, evolution_data["p_s"], evolution_data["eta_sum"]) @ evolution_data["s1"] @ evo
-        evo_average += evo
-    evo_average /= trials
+        U_total_average += evo
+    U_total_average /= trials
 
     return {
-        "sample_error": float(np.linalg.norm(evo_average - evolution_data["U_exact"], 2)),
-        "sample_fluctuation": float(np.linalg.norm(evo_average - evolution_data["deterministic"], 2)),
+        "sample_error": float(np.linalg.norm(U_total_average - evolution_data["U_exact"], 2)),
+        "sample_fluctuation": float(np.linalg.norm(U_total_average - evolution_data["deterministic"], 2)),
         "expectation_bias": expectation_bias,
         "t": float(evolution_data["t"]),
         "eta_sum": float(evolution_data["eta_sum"]),

@@ -166,7 +166,7 @@ def estimate_total_sample_error(
     p_order = np.array([raw_weights[s] / raw_total for s in s_orders], dtype=float)
 
     rng = np.random.default_rng(seed)
-    evo_average = np.zeros_like(identity)
+    U_total_average = np.zeros_like(identity)
     for _ in tqdm(range(trials), desc=f"r={r}", leave=False, disable=not sys.stderr.isatty()):
         evo = identity.copy()
         for _ in range(r):
@@ -184,13 +184,13 @@ def estimate_total_sample_error(
                 @ evolution_data["s1"]
                 @ evo
             )
-        evo_average += evo
-    evo_average /= trials
+        U_total_average += evo
+    U_total_average /= trials
 
     deterministic = np.linalg.matrix_power(evolution_data["tilde_V"] @ evolution_data["s1"], r)
     return {
-        "sample_error": float(np.linalg.norm(evo_average - evolution_data["U_exact"], 2)),
-        "sample_fluctuation": float(np.linalg.norm(evo_average - deterministic, 2)),
+        "sample_error": float(np.linalg.norm(U_total_average - evolution_data["U_exact"], 2)),
+        "sample_fluctuation": float(np.linalg.norm(U_total_average - deterministic, 2)),
         "expectation_bias": expectation_bias,
         "eta_pair_sum": float(evolution_data["eta_pair_sum"]),
         "pair_scale": float(evolution_data["pair_scale"]),
