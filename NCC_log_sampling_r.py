@@ -128,6 +128,7 @@ def sample_Pauli_then_compensate_exp(
     raw_total: float,
     atol: float = 1e-10,
 ):
+    """Sample one compensated Pauli term for log-NCC."""
     data = F_terms[order]
     labels = data["labels"]
     probs = np.abs(data["coeffs"]) / data["l1_norm"]

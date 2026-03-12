@@ -38,6 +38,7 @@ def sample_Pauli_then_compensate_exp(
     eta_sum: float,
     atol: float = 1e-10,
 ) -> np.ndarray:
+    """Sample one compensated Pauli term for original-NCC."""
     order = int(rng.choice([2, 3], p=p_s))
     if order == 2:
         coeffs = static["c1_coeffs"]

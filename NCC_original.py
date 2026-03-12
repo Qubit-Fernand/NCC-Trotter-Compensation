@@ -220,7 +220,7 @@ def main():
     print("tilde_V compensation-vs-Taylor check:", evolution_data["validation_error"])
 
     def sample_Pauli_then_compensate_exp(rng, s, atol=1e-10):
-        """Sample a Hermitian Pauli W from order-s commutator data"""
+        """Sample a Hermitian Pauli W from order-s commutator data."""
         if s == 2:
             coeffs = static["c1_coeffs"]
             labels = static["c1_labels"]

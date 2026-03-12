@@ -429,7 +429,7 @@ def main():
     rng = np.random.default_rng(seed=7)
 
     def sample_Pauli_then_compensate_exp(order, atol=1e-10):
-        """Sample one complete compensation component, including the raw-weight sum."""
+        """Sample one full compensation component, including the raw-weight sum."""
         F_term = F_terms[order]
         labels = F_term["labels"]
         probs = np.abs(F_term["coeffs"]) / F_term["l1_norm"]
