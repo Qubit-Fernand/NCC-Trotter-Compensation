@@ -15,7 +15,7 @@ from NCC_log import (
     pauli_basis,
     pauli_decomposition,
     phi_term,
-    phi_term_log_fit,
+    phi_term_by_log,
     tilde_F_term,
 )
 
@@ -42,7 +42,7 @@ def truncated_bch_exponential(phi_terms, x, k_order, q0):
 def validate_phi_and_tilde_f(n=4, j=1.0, h=1.0, t=0.05, k_order=1, s0=4):
     a_mat, b_mat = build_periodic_ab(n, j, h)
     phi_terms, _ = phi_term(a_mat, b_mat, s0)
-    phi_terms_log_fit, _ = phi_term_log_fit(a_mat, b_mat, s0, base_step=min(t, 0.02))
+    phi_terms_by_log, _ = phi_term_by_log(a_mat, b_mat, s0, base_step=min(t, 0.02))
     tilde_f_terms = tilde_F_term(phi_terms, k_order, s0, s0)
     ref_phi = reference_phi_terms_k1(a_mat, b_mat)
     basis = pauli_basis(n)
@@ -53,7 +53,7 @@ def validate_phi_and_tilde_f(n=4, j=1.0, h=1.0, t=0.05, k_order=1, s0=4):
             continue
         ref_norm = max(np.linalg.norm(ref_phi[q], 2), 1e-12)
         metrics[f"phi_{q}_relative"] = np.linalg.norm(phi_terms[q] - ref_phi[q], 2) / ref_norm
-        metrics[f"phi_{q}_vs_log_fit"] = np.linalg.norm(phi_terms[q] - phi_terms_log_fit[q], 2) / ref_norm
+        metrics[f"phi_{q}_vs_log_fit"] = np.linalg.norm(phi_terms[q] - phi_terms_by_log[q], 2) / ref_norm
         metrics[f"tilde_f_{q}_relative"] = np.linalg.norm(tilde_f_terms[q] - ref_phi[q], 2) / ref_norm
 
     single_phi_max = min(2 * k_order + 1, s0)

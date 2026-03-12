@@ -24,6 +24,9 @@ def commutator(A, B):
     return A @ B - B @ A
 
 
+PAULI_SINGLE_QUBIT = (I, X, Y, Z)
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--N", type=int, default=6, help="number of spins")
@@ -33,18 +36,6 @@ def parse_args():
     parser.add_argument("--r", type=int, default=20, help="Trotter steps")
     parser.add_argument("--trials", type=int, default=1000, help="NCC trials")
     return parser.parse_args()
-
-
-def pauli_basis(num_qubits):
-    single_basis = [I, X, Y, Z]
-    basis = [np.array([[1]], dtype=complex)]
-    for _ in range(num_qubits):
-        next_basis = []
-        for left in basis:
-            for right in single_basis:
-                next_basis.append(np.kron(left, right))
-        basis = next_basis
-    return basis
 
 
 def build_periodic_ab(num_qubits, coupling_j, field_h):
@@ -73,13 +64,32 @@ def build_periodic_ab(num_qubits, coupling_j, field_h):
     return A_mat, B_mat
 
 
-def pauli_decomposition(matrix, basis, antihermitian=False, tol=1e-10):
-    """Decompose a matrix in the Pauli basis."""
+@lru_cache(maxsize=512)
+def cached_pauli_matrix_from_label(label):
+    """Materialize a dense Pauli matrix from a compact integer label."""
+    matrix = np.array([[1]], dtype=complex)
+    for entry in label:
+        matrix = np.kron(matrix, PAULI_SINGLE_QUBIT[entry])
+    return matrix
+
+
+def pauli_decomposition_stream(matrix, antihermitian=False, tol=1e-10):
+    """Decompose a matrix in the Pauli basis without materializing the full basis list."""
+
+    def label_iter(num_qubits):
+        if num_qubits == 0:
+            yield ()
+            return
+        for prefix in label_iter(num_qubits - 1):
+            for pauli_idx in range(4):
+                yield prefix + (pauli_idx,)
+
     num_qubits = int(round(np.log2(matrix.shape[0])))
     scale = 2**num_qubits
     coeffs = []
-    terms = []
-    for P in basis:
+    labels = []
+    for label in label_iter(num_qubits):
+        P = cached_pauli_matrix_from_label(label)
         coeff = np.trace(P.conj().T @ matrix) / scale
         if antihermitian:
             if abs(coeff) <= tol:
@@ -90,37 +100,35 @@ def pauli_decomposition(matrix, basis, antihermitian=False, tol=1e-10):
             if abs(coeff) <= tol:
                 continue
         coeffs.append(coeff)
-        terms.append(P)
+        labels.append(label)
 
     coeffs = np.array(coeffs, dtype=complex)
     l1_norm = float(np.sum(np.abs(coeffs)))
     if l1_norm <= 0:
         kind = "anti-Hermitian Pauli" if antihermitian else "Pauli"
         raise ValueError(f"empty {kind} decomposition: zero decomposition weight")
-    return coeffs, terms, l1_norm
+    return coeffs, labels, l1_norm
 
 
 @lru_cache(maxsize=None)
 def build_static_data(n: int, j: float, h: float) -> dict:
     A_mat, B_mat = build_periodic_ab(n, j, h)
-    basis = pauli_basis(n)
     c1 = commutator(B_mat, A_mat)
     c2 = 1j * (2 * commutator(B_mat, commutator(A_mat, B_mat)) + commutator(A_mat, commutator(A_mat, B_mat)))
-    c1_coeffs, c1_terms, c1_l1 = pauli_decomposition(c1, basis, antihermitian=True)
-    c2_coeffs, c2_terms, c2_l1 = pauli_decomposition(c2, basis, antihermitian=True)
+    c1_coeffs, c1_labels, c1_l1 = pauli_decomposition_stream(c1, antihermitian=True)
+    c2_coeffs, c2_labels, c2_l1 = pauli_decomposition_stream(c2, antihermitian=True)
     dim = 2**n
     return {
         "n": n,
         "A_mat": A_mat,
         "B_mat": B_mat,
-        "basis": basis,
         "C1": c1,
         "C2": c2,
         "c1_coeffs": c1_coeffs,
-        "c1_terms": c1_terms,
+        "c1_labels": c1_labels,
         "c1_l1": c1_l1,
         "c2_coeffs": c2_coeffs,
-        "c2_terms": c2_terms,
+        "c2_labels": c2_labels,
         "c2_l1": c2_l1,
         "identity": np.eye(dim, dtype=complex),
         "h_total": A_mat + B_mat,
@@ -140,14 +148,14 @@ def build_tilde_V(static, t_total: float, r: int, validation_tol=1e-10):
     U_exact = expm(-1j * static["h_total"] * t_total)
 
     tilde_V = np.zeros_like(static["identity"])
-    for weight, coeffs, terms, l1_norm in (
-        (p_s[0], static["c1_coeffs"], static["c1_terms"], static["c1_l1"]),
-        (p_s[1], static["c2_coeffs"], static["c2_terms"], static["c2_l1"]),
+    for weight, coeffs, labels, l1_norm in (
+        (p_s[0], static["c1_coeffs"], static["c1_labels"], static["c1_l1"]),
+        (p_s[1], static["c2_coeffs"], static["c2_labels"], static["c2_l1"]),
     ):
         probs = np.abs(coeffs) / l1_norm
-        for prob, coeff, pauli in zip(probs, coeffs, terms):
+        for prob, coeff, label in zip(probs, coeffs, labels):
             sign = coeff / (1j * abs(coeff))
-            W_mat = sign * pauli
+            W_mat = sign * cached_pauli_matrix_from_label(label)
             tilde_V += weight * prob * (static["identity"] + 1j * eta_sum * W_mat)
 
     # Taylor form for original NCC: I + C1 t^2 / 2 + C2 t^3 / 6.
@@ -206,7 +214,7 @@ def main():
 
     print("C1 l1:", static["c1_l1"])
     print("C2 l1:", static["c2_l1"])
-    print("C1/C2 Pauli terms:", len(static["c1_terms"]), len(static["c2_terms"]))
+    print("C1/C2 Pauli terms:", len(static["c1_labels"]), len(static["c2_labels"]))
     print("eta2, eta3:", evolution_data["eta2"], evolution_data["eta3"])
     print("p_s:", evolution_data["p_s"])
     print("tilde_V compensation-vs-Taylor check:", evolution_data["validation_error"])
@@ -215,23 +223,22 @@ def main():
         """Sample a Hermitian Pauli W from order-s commutator data"""
         if s == 2:
             coeffs = static["c1_coeffs"]
-            terms = static["c1_terms"]
+            labels = static["c1_labels"]
             l1_norm = static["c1_l1"]
         elif s == 3:
             coeffs = static["c2_coeffs"]
-            terms = static["c2_terms"]
+            labels = static["c2_labels"]
             l1_norm = static["c2_l1"]
         else:
             raise ValueError(f"unsupported order s={s}")
         probs = np.abs(coeffs) / l1_norm
-        idx = int(rng.choice(len(terms), p=probs))
-        # For antiHermtian F_2 and F_3, the coeffs are purely imaginary, so W is Hermitian.
+        # sample Pauli from the expansion of given F_term
+        idx = int(rng.choice(len(labels), p=probs))
         coeff = coeffs[idx]
-        pauli = terms[idx]
-
         # With prob, sample I + eta_sum * (\pm 1j) * pauli, note the sign
         sign = coeff / (1j * abs(coeff))
-        W_mat = sign * pauli
+        W_mat = sign * cached_pauli_matrix_from_label(labels[idx])
+        # For antiHermtian F_2 and F_3, the coeffs are purely imaginary, so W is Hermitian.
         hermitian_err = np.linalg.norm(W_mat - W_mat.conj().T, ord="fro")
         if hermitian_err > atol:
             raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")

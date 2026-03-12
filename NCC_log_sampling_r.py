@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from NCC_log import build_static_data, build_tilde_V
+from NCC_log import build_static_data, build_tilde_V, cached_pauli_matrix_from_label
 
 
 def build_parser():
@@ -129,10 +129,12 @@ def sample_Pauli_then_compensate_exp(
     atol: float = 1e-10,
 ):
     data = F_terms[order]
+    labels = data["labels"]
     probs = np.abs(data["coeffs"]) / data["l1_norm"]
-    idx = int(rng.choice(len(data["terms"]), p=probs))
+    # sample Pauli from the expansion of given F_term
+    idx = int(rng.choice(len(labels), p=probs))
     coeff = data["coeffs"][idx]
-    pauli = data["terms"][idx]
+    pauli = cached_pauli_matrix_from_label(labels[idx])
     if data["kind"] == "pair":
         phase = coeff / (1j * abs(coeff))
         W_mat = phase * pauli
@@ -200,6 +202,7 @@ def estimate_total_sample_error(
 
 def search_r_min(
     static: dict,
+    evolution_cache: dict[int, dict],
     t_total: float,
     epsilon: float,
     trials: int,
@@ -212,7 +215,6 @@ def search_r_min(
 ):
     """Search expected and sampled r_min while reusing cached search results."""
     result_cache: dict[int, dict] = {}
-    evolution_cache: dict[int, dict] = {}
 
     def search_min_by(metric_key: str) -> tuple[int, dict]:
         # Exponential search finds an upper bound; binary search then locates
@@ -295,6 +297,7 @@ def main(argv=None):
     q0 = max(3, q0)
     output_path = sampling_output_path(args, q0, s0)
     static = build_static_data(n=args.N, q0=q0, s0=s0, epsilon=args.epsilon, j=args.J, h=args.h, K=1)
+    evolution_cache: dict[int, dict] = {}
     payload = {
         "script": "NCC_log_sampling_r.py",
         "params": {
@@ -330,6 +333,7 @@ def main(argv=None):
         label = f"[repeat {repetition + 1}/{args.repeats}]"
         sampled_r_min, metrics, expected_r_min = search_r_min(
             static=static,
+            evolution_cache=evolution_cache,
             t_total=args.T,
             epsilon=args.epsilon,
             trials=args.trials,

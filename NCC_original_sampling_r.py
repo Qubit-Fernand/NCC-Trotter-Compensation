@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from NCC_original import build_static_data, build_tilde_V
+from NCC_original import build_static_data, build_tilde_V, cached_pauli_matrix_from_label
 
 
 def build_parser():
@@ -38,19 +38,23 @@ def sample_Pauli_then_compensate_exp(
     eta_sum: float,
     atol: float = 1e-10,
 ) -> np.ndarray:
-    order = int(rng.choice(2, p=p_s))
-    if order == 0:
-        probs = np.abs(static["c1_coeffs"]) / static["c1_l1"]
-        idx = int(rng.choice(len(static["c1_terms"]), p=probs))
-        coeff = static["c1_coeffs"][idx]
-        pauli = static["c1_terms"][idx]
+    order = int(rng.choice([2, 3], p=p_s))
+    if order == 2:
+        coeffs = static["c1_coeffs"]
+        labels = static["c1_labels"]
+        l1_norm = static["c1_l1"]
+    elif order == 3:
+        coeffs = static["c2_coeffs"]
+        labels = static["c2_labels"]
+        l1_norm = static["c2_l1"]
     else:
-        probs = np.abs(static["c2_coeffs"]) / static["c2_l1"]
-        idx = int(rng.choice(len(static["c2_terms"]), p=probs))
-        coeff = static["c2_coeffs"][idx]
-        pauli = static["c2_terms"][idx]
+        raise ValueError(f"unsupported sampled order={order}")
+    probs = np.abs(coeffs) / l1_norm
+    idx = int(rng.choice(len(labels), p=probs))
+    coeff = coeffs[idx]
     sign = coeff / (1j * abs(coeff))
-    W_mat = sign * pauli
+    # sample Pauli from the expansion of given F_term
+    W_mat = sign * cached_pauli_matrix_from_label(labels[idx])
     hermitian_err = np.linalg.norm(W_mat - W_mat.conj().T, ord="fro")
     if hermitian_err > atol:
         raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
@@ -101,6 +105,9 @@ def confidence_interval(values: np.ndarray) -> tuple[float, float, float]:
     std = float(np.std(values, ddof=1))
     half_width = 1.96 * std / math.sqrt(len(values))
     return mean, mean - half_width, mean + half_width
+
+
+"""The following three functions handle the output path"""
 
 
 def resolve_output_dir(base_out_dir: Path, tag: str) -> Path:
@@ -172,6 +179,7 @@ def save_sampling_checkpoint(output_path: Path, payload: dict):
 
 def search_r_min(
     static: dict,
+    evolution_cache: dict[int, dict],
     t_total: float,
     epsilon: float,
     trials: int,
@@ -184,7 +192,6 @@ def search_r_min(
 ):
     """Search sampled and expected r_min while reusing cached search results."""
     result_cache: dict[int, dict] = {}
-    evolution_cache: dict[int, dict] = {}
 
     def search_min_by(metric_key: str) -> tuple[int, dict]:
         # Exponential search finds an upper bound; binary search then locates
@@ -254,6 +261,7 @@ def main(argv=None):
     args.out_dir.mkdir(parents=True, exist_ok=True)
     output_path = sampling_output_path(args)
     static = build_static_data(args.N, args.J, args.h)
+    evolution_cache: dict[int, dict] = {}
     payload = {
         "script": "NCC_original_sampling_r.py",
         "params": {
@@ -293,6 +301,7 @@ def main(argv=None):
         label = f"[repeat {repetition + 1}/{args.repeats}]"
         sampled_r_min, metrics, expected_r_min = search_r_min(
             static=static,
+            evolution_cache=evolution_cache,
             t_total=args.T,
             epsilon=args.epsilon,
             trials=args.trials,

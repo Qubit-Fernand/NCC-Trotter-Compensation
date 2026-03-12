@@ -13,6 +13,7 @@ X = np.array([[0, 1], [1, 0]], dtype=complex)
 Y = np.array([[0, -1j], [1j, 0]], dtype=complex)
 Z = np.array([[1, 0], [0, -1]], dtype=complex)
 I = np.eye(2, dtype=complex)
+PAULI_SINGLE_QUBIT = (I, X, Y, Z)
 
 
 def commutator(a, b):
@@ -43,18 +44,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def pauli_basis(n):
-    single = [I, X, Y, Z]
-    basis = [np.array([[1]], dtype=complex)]
-    for _ in range(n):
-        nxt = []
-        for left in basis:
-            for right in single:
-                nxt.append(np.kron(left, right))
-        basis = nxt
-    return basis
-
-
 def build_periodic_ab(n, j, h):
     """Build A and B matrices for the periodic Heisenberg Hamiltonian."""
 
@@ -81,7 +70,7 @@ def build_periodic_ab(n, j, h):
     return a_mat, b_mat
 
 
-def phi_term_log_fit(A_mat, B_mat, q_max, base_step=None):
+def phi_term_by_log(A_mat, B_mat, q_max, base_step=None):
     """Archived numeric extractor: fit Phi_q from log(V(x)) near x=0."""
 
     def bch_remainder(A_mat, B_mat, x):
@@ -197,13 +186,32 @@ def tilde_F_term(Phi_terms, k_order, q0, s0):
     return tilde_F_terms
 
 
-def pauli_decomposition(mat, basis, antihermitian=False, tol=1e-10):
-    """Decompose mat in the Pauli basis."""
+@lru_cache(maxsize=512)
+def cached_pauli_matrix_from_label(label):
+    """Materialize a dense Pauli matrix from a compact integer label."""
+    matrix = np.array([[1]], dtype=complex)
+    for entry in label:
+        matrix = np.kron(matrix, PAULI_SINGLE_QUBIT[entry])
+    return matrix
+
+
+def pauli_decomposition_stream(mat, antihermitian=False, tol=1e-10):
+    """Decompose mat in the Pauli basis without materializing the full basis list."""
+
+    def label_iter(num_qubits):
+        if num_qubits == 0:
+            yield ()
+            return
+        for prefix in label_iter(num_qubits - 1):
+            for pauli_idx in range(4):
+                yield prefix + (pauli_idx,)
+
     n = int(round(math.log2(mat.shape[0])))
     scale = 2**n
     coeffs = []
-    terms = []
-    for p in basis:
+    labels = []
+    for label in label_iter(n):
+        p = cached_pauli_matrix_from_label(label)
         coeff = np.trace(p.conj().T @ mat) / scale
         if antihermitian:
             if abs(coeff) <= tol:
@@ -214,13 +222,13 @@ def pauli_decomposition(mat, basis, antihermitian=False, tol=1e-10):
             if abs(coeff) <= tol:
                 continue
         coeffs.append(coeff)
-        terms.append(p)
+        labels.append(label)
     coeffs = np.array(coeffs, dtype=complex)
     l1_norm = float(np.sum(np.abs(coeffs)))
     if l1_norm <= 0:
         kind = "anti-Hermitian Pauli" if antihermitian else "Pauli"
         raise ValueError(f"empty {kind} decomposition")
-    return coeffs, terms, l1_norm
+    return coeffs, labels, l1_norm
 
 
 @lru_cache(maxsize=None)
@@ -228,24 +236,18 @@ def build_static_data(n, q0, s0, epsilon=0.01, j=1.0, h=1.0, K=1):
     """Precompute r-independent data for log-NCC evaluation."""
 
     A_mat, B_mat = build_periodic_ab(n, j, h)
-    basis = pauli_basis(n)
     Phi_terms, _ = phi_term(A_mat, B_mat, q0)
     tilde_F_terms = tilde_F_term(Phi_terms, K, q0, s0)
     identity = np.eye(2**n, dtype=complex)
 
     # F_terms is the Pauli decomposition of the tilde_F_terms, tagged pairable or not.
     F_terms = {}
-    phi_l1 = {}
     tilde_F_l1 = {}
     pairable_orders = []
     non_pairable_orders = []
     for order in range(K + 1, s0 + 1):
-        phi_q = Phi_terms[order]
-        _, _, phi_q_l1 = pauli_decomposition(phi_q, basis, antihermitian=True)
-        phi_l1[order] = phi_q_l1
-
-        coeffs, terms, l1_norm = pauli_decomposition(tilde_F_terms[order], basis)
-        F_terms[order] = {"kind": "tail", "coeffs": coeffs, "terms": terms, "l1_norm": l1_norm}
+        coeffs, labels, l1_norm = pauli_decomposition_stream(tilde_F_terms[order])
+        F_terms[order] = {"kind": "tail", "coeffs": coeffs, "labels": labels, "l1_norm": l1_norm}
         tilde_F_l1[order] = l1_norm
 
         antiherm_err = np.linalg.norm(
@@ -253,16 +255,15 @@ def build_static_data(n, q0, s0, epsilon=0.01, j=1.0, h=1.0, K=1):
             ord="fro",
         )
         if antiherm_err <= 1e-8:
-            pair_coeffs, pair_terms, _ = pauli_decomposition(
+            pair_coeffs, pair_labels, _ = pauli_decomposition_stream(
                 tilde_F_terms[order],
-                basis,
                 antihermitian=True,
             )
             pairable_orders.append(order)
             F_terms[order] = {
                 "kind": "pair",
                 "coeffs": pair_coeffs,
-                "terms": pair_terms,
+                "labels": pair_labels,
                 "l1_norm": l1_norm,
             }
         else:
@@ -271,11 +272,9 @@ def build_static_data(n, q0, s0, epsilon=0.01, j=1.0, h=1.0, K=1):
     return {
         "A_mat": A_mat,
         "B_mat": B_mat,
-        "basis": basis,
         "identity": identity,
         "Phi_terms": Phi_terms,
         "tilde_F_terms": tilde_F_terms,
-        "phi_l1": phi_l1,
         "tilde_F_l1": tilde_F_l1,
         "F_terms": F_terms,
         "s_orders": list(range(K + 1, s0 + 1)),
@@ -322,7 +321,8 @@ def build_tilde_V(
         F_term = F_terms[order]
         weight = raw_weights[order]
         probs = np.abs(F_term["coeffs"]) / F_term["l1_norm"]
-        for prob, coeff, pauli in zip(probs, F_term["coeffs"], F_term["terms"]):
+        for prob, coeff, label in zip(probs, F_term["coeffs"], F_term["labels"]):
+            pauli = cached_pauli_matrix_from_label(label)
             if F_term["kind"] == "pair":
                 phase = coeff / (1j * abs(coeff))
                 W_mat = phase * pauli
@@ -400,7 +400,6 @@ def main():
     identity = static["identity"]
     Phi_terms = static["Phi_terms"]
     tilde_F_terms = static["tilde_F_terms"]
-    phi_l1 = static["phi_l1"]
     tilde_F_l1 = static["tilde_F_l1"]
     F_terms = static["F_terms"]
     s_orders = static["s_orders"]
@@ -420,7 +419,6 @@ def main():
 
     print("eta_pair_sum:", eta_pair_sum)
     print("eta by order:", {s: eta[s] for s in s_orders})
-    print("Phi_q l1:", {s: phi_l1[s] for s in s_orders})
     print("tilde_F Pauli-l1:", {s: tilde_F_l1[s] for s in s_orders})
     print("mixed raw weights:", {s: raw_weights[s] for s in s_orders})
     print("Euler-pairable orders:", pairable_orders)
@@ -433,11 +431,12 @@ def main():
     def sample_Pauli_then_compensate_exp(order, atol=1e-10):
         """Sample one complete compensation component, including the raw-weight sum."""
         F_term = F_terms[order]
-        terms = F_term["terms"]
+        labels = F_term["labels"]
         probs = np.abs(F_term["coeffs"]) / F_term["l1_norm"]
-        idx = int(rng.choice(len(terms), p=probs))
+        # sample Pauli from the expansion of given F_term
+        idx = int(rng.choice(len(labels), p=probs))
         coeff = F_term["coeffs"][idx]
-        pauli = terms[idx]
+        pauli = cached_pauli_matrix_from_label(labels[idx])
         if F_term["kind"] == "pair":
             phase = coeff / (1j * abs(coeff))
             W_mat = phase * pauli
