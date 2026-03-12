@@ -22,3 +22,5 @@ notebook/
 data_Ising/
 # data/smoke/
 # /*.sh
+
+logs/

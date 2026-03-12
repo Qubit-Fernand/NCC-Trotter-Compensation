@@ -308,7 +308,6 @@ def main(argv=None):
             "repeats": args.repeats,
             "base_seed": args.seed,
             "r_max": args.r_max,
-            "sampling": "weighted",
             "s0": s0,
             "q0": q0,
         },
