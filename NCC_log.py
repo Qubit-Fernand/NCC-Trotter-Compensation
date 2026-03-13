@@ -191,13 +191,18 @@ def tilde_F_term(Phi_terms, k_order, q0, s0):
     return tilde_F_terms
 
 
-@lru_cache(maxsize=512)
-def cached_pauli_matrix_from_label(label):
+def pauli_matrix_from_label(label):
     """Materialize a dense Pauli matrix from a compact integer label."""
     matrix = np.array([[1]], dtype=complex)
     for entry in label:
         matrix = np.kron(matrix, PAULI_SINGLE_QUBIT[entry])
     return matrix
+
+
+@lru_cache(maxsize=512)
+def cached_pauli_matrix_from_label(label):
+    """Materialize and cache a dense Pauli matrix from a compact integer label."""
+    return pauli_matrix_from_label(label)
 
 
 def pauli_decomposition_stream(mat, antihermitian=False, tol=1e-10):
@@ -216,7 +221,7 @@ def pauli_decomposition_stream(mat, antihermitian=False, tol=1e-10):
     coeffs = []
     labels = []
     for label in label_iter(n):
-        p = cached_pauli_matrix_from_label(label)
+        p = pauli_matrix_from_label(label)
         coeff = np.trace(p.conj().T @ mat) / scale
         if antihermitian:
             if abs(coeff) <= tol:

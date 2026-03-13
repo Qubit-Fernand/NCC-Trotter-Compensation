@@ -4,6 +4,7 @@ import argparse
 import itertools
 import math
 from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
 from scipy.linalg import expm, logm
@@ -27,7 +28,7 @@ def parse_args():
     parser.add_argument("--h", type=float, default=1.0, help="field strength")
     parser.add_argument("--T", type=float, default=1.0, help="total evolution time")
     parser.add_argument("--r", type=int, default=20, help="number of Trotter segments")
-    parser.add_argument("--trials", type=int, default=2000, help="Monte Carlo trials")
+    parser.add_argument("--trials", type=int, default=1000, help="Monte Carlo trials")
     parser.add_argument("--epsilon", type=float, default=0.01, help="target precision")
     parser.add_argument(
         "--s0",

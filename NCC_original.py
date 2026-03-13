@@ -69,13 +69,18 @@ def build_periodic_ab(num_qubits, coupling_j, field_h):
     return A_mat, B_mat
 
 
-@lru_cache(maxsize=512)
-def cached_pauli_matrix_from_label(label):
+def pauli_matrix_from_label(label):
     """Materialize a dense Pauli matrix from a compact integer label."""
     matrix = np.array([[1]], dtype=complex)
     for entry in label:
         matrix = np.kron(matrix, PAULI_SINGLE_QUBIT[entry])
     return matrix
+
+
+@lru_cache(maxsize=512)
+def cached_pauli_matrix_from_label(label):
+    """Materialize and cache a dense Pauli matrix from a compact integer label."""
+    return pauli_matrix_from_label(label)
 
 
 def pauli_decomposition_stream(matrix, antihermitian=False, tol=1e-10):
@@ -94,7 +99,7 @@ def pauli_decomposition_stream(matrix, antihermitian=False, tol=1e-10):
     coeffs = []
     labels = []
     for label in label_iter(num_qubits):
-        P = cached_pauli_matrix_from_label(label)
+        P = pauli_matrix_from_label(label)
         coeff = np.trace(P.conj().T @ matrix) / scale
         if antihermitian:
             if abs(coeff) <= tol:
