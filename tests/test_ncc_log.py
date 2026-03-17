@@ -3,21 +3,58 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from scipy.linalg import expm
+from scipy.linalg import expm, logm
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from NCC_log import (
+from Pauli_Hamiltonian_BCH import (
     build_periodic_ab,
     cached_pauli_matrix_from_label,
     commutator,
     pauli_decomposition_stream,
     phi_term,
-    phi_term_by_log,
     tilde_F_term,
 )
+
+
+def phi_term_by_log(a_mat, b_mat, q_max, base_step=None):
+    """Archived numeric extractor: fit Phi_q from log(V(x)) near x=0."""
+
+    def bch_remainder(x):
+        return expm(-1j * (a_mat + b_mat) * x) @ expm(1j * a_mat * x) @ expm(1j * b_mat * x)
+
+    def logm_close_to_identity(unitary_like):
+        omega = logm(unitary_like)
+        return 0.5 * (omega - omega.conj().T)
+
+    dim = a_mat.shape[0]
+    if base_step is None:
+        op_scale = max(
+            np.linalg.norm(a_mat, 2),
+            np.linalg.norm(b_mat, 2),
+            np.linalg.norm(a_mat + b_mat, 2),
+            1.0,
+        )
+        base_step = min(0.02, 0.2 / op_scale)
+    base_step = max(float(base_step), 1e-3)
+
+    phi_terms = {}
+    for q in range(2, q_max + 1):
+        fit_order = q_max - q + 3
+        xs = base_step / (2.0 ** np.arange(fit_order))
+        samples = []
+        for x in xs:
+            omega = logm_close_to_identity(bch_remainder(x))
+            residual = omega.copy()
+            for lower_q in range(2, q):
+                residual -= phi_terms[lower_q] * (x**lower_q)
+            samples.append((residual / (x**q)).reshape(-1))
+        vand = np.vander(xs, N=fit_order, increasing=True)
+        coeffs = np.linalg.solve(vand, np.asarray(samples))
+        phi_terms[q] = coeffs[0].reshape(dim, dim)
+    return phi_terms, base_step
 
 
 def reference_phi_terms_k1(a_mat, b_mat):
@@ -47,7 +84,7 @@ def streamed_order_data(term, antihermitian=False):
 
 def validate_phi_and_tilde_f(n=4, j=1.0, h=1.0, t=0.05, k_order=1, s0=4):
     a_mat, b_mat = build_periodic_ab(n, j, h)
-    phi_terms, _ = phi_term(a_mat, b_mat, s0)
+    phi_terms = phi_term(a_mat, b_mat, s0)
     phi_terms_by_log, _ = phi_term_by_log(a_mat, b_mat, s0, base_step=min(t, 0.02))
     tilde_f_terms = tilde_F_term(phi_terms, k_order, s0, s0)
     ref_phi = reference_phi_terms_k1(a_mat, b_mat)

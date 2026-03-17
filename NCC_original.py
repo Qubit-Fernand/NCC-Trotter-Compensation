@@ -4,27 +4,13 @@ We use the commutator results' Pauli expansion to pair into exp, unlike the laye
 """
 
 import argparse
-from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
 from scipy.linalg import expm
 from tqdm import tqdm
 
-
-# Define Pauli matrices
-X = np.array([[0, 1], [1, 0]])  # Pauli-X matrix
-Y = np.array([[0, -1j], [1j, 0]])  # Pauli-Y matrix
-Z = np.array([[1, 0], [0, -1]])  # Pauli-Z matrix
-I = np.eye(2)  # Identity matrix
-
-
-def commutator(A, B):
-    """Compute the commutator [A, B] = AB - BA"""
-    return A @ B - B @ A
-
-
-PAULI_SINGLE_QUBIT = (I, X, Y, Z)
+from Pauli_Hamiltonian_BCH import build_periodic_ab, cached_pauli_matrix_from_label, commutator, pauli_decomposition_stream
 
 
 def parse_args():
@@ -43,84 +29,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def build_periodic_ab(num_qubits, coupling_j, field_h):
-    """Build A and B matrices for the periodic Heisenberg Hamiltonian."""
-
-    def two_local_term(index, pauli):
-        if index < num_qubits - 1:
-            return coupling_j * np.kron(
-                np.eye(2**index, dtype=complex),
-                np.kron(np.kron(pauli, pauli), np.eye(2 ** (num_qubits - index - 2), dtype=complex)),
-            )
-        return coupling_j * np.kron(pauli, np.kron(np.eye(2 ** (num_qubits - 2), dtype=complex), pauli))
-
-    def z_term(index):
-        return field_h * np.kron(
-            np.eye(2**index, dtype=complex),
-            np.kron(Z, np.eye(2 ** (num_qubits - index - 1), dtype=complex)),
-        )
-
-    A_mat = np.zeros((2**num_qubits, 2**num_qubits), dtype=complex)
-    B_mat = np.zeros((2**num_qubits, 2**num_qubits), dtype=complex)
-    for index in range(0, num_qubits, 2):
-        A_mat += two_local_term(index, X) + two_local_term(index, Y) + two_local_term(index, Z) + z_term(index)
-    for index in range(1, num_qubits, 2):
-        B_mat += two_local_term(index, X) + two_local_term(index, Y) + two_local_term(index, Z) + z_term(index)
-    return A_mat, B_mat
-
-
-def pauli_matrix_from_label(label):
-    """Materialize a dense Pauli matrix from a compact integer label."""
-    matrix = np.array([[1]], dtype=complex)
-    for entry in label:
-        matrix = np.kron(matrix, PAULI_SINGLE_QUBIT[entry])
-    return matrix
-
-
-@lru_cache(maxsize=512)
-def cached_pauli_matrix_from_label(label):
-    """Materialize and cache a dense Pauli matrix from a compact integer label."""
-    return pauli_matrix_from_label(label)
-
-
-def pauli_decomposition_stream(matrix, antihermitian=False, tol=1e-10):
-    """Decompose a matrix in the Pauli basis without materializing the full basis list."""
-
-    def label_iter(num_qubits):
-        if num_qubits == 0:
-            yield ()
-            return
-        for prefix in label_iter(num_qubits - 1):
-            for pauli_idx in range(4):
-                yield prefix + (pauli_idx,)
-
-    num_qubits = int(round(np.log2(matrix.shape[0])))
-    scale = 2**num_qubits
-    coeffs = []
-    labels = []
-    for label in label_iter(num_qubits):
-        P = pauli_matrix_from_label(label)
-        coeff = np.trace(P.conj().T @ matrix) / scale
-        if antihermitian:
-            if abs(coeff) <= tol:
-                continue
-            if abs(np.real(coeff)) > 1e-7:
-                raise ValueError("anti-Hermitian Pauli decomposition has non-negligible real Pauli coefficient")
-        else:
-            if abs(coeff) <= tol:
-                continue
-        coeffs.append(coeff)
-        labels.append(label)
-
-    coeffs = np.array(coeffs, dtype=complex)
-    l1_norm = float(np.sum(np.abs(coeffs)))
-    if l1_norm <= 0:
-        kind = "anti-Hermitian Pauli" if antihermitian else "Pauli"
-        raise ValueError(f"empty {kind} decomposition: zero decomposition weight")
-    return coeffs, labels, l1_norm
-
-
-@lru_cache(maxsize=None)
 def build_static_data(n: int, j: float, h: float) -> dict:
     A_mat, B_mat = build_periodic_ab(n, j, h)
     c1 = commutator(B_mat, A_mat)

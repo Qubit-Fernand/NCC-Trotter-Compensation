@@ -7,7 +7,8 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from NCC_log import build_static_data, build_tilde_V, cached_pauli_matrix_from_label
+from NCC_log import build_static_data, build_tilde_V
+from Pauli_Hamiltonian_BCH import cached_pauli_matrix_from_label
 
 
 def build_parser():

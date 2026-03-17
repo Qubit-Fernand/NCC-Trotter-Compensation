@@ -122,12 +122,8 @@ def phi_term_by_log(a_mat, b_mat, q_max, base_step=None):
     return phi_terms, base_step
 
 
-def phi_term(a_mat, b_mat, q_max, base_step=None):
-    """Compute Phi_q directly from the BCH commutator formula in the PDF.
-
-    ``base_step`` is accepted for backward compatibility with older notebook
-    code paths that used the archived log-fit extractor.
-    """
+def phi_term(a_mat, b_mat, q_max):
+    """Compute Phi_q directly from the BCH commutator formula in the PDF."""
 
     def compositions(total, parts):
         if parts == 1:
@@ -164,7 +160,7 @@ def phi_term(a_mat, b_mat, q_max, base_step=None):
                 reordered = [base_seq[idx] for idx in perm]
                 total += prefactor * coeff * right_nested_commutator(reordered)
         phi_terms[q] = total
-    return phi_terms, None
+    return phi_terms
 
 
 def tilde_F_term(phi_terms, k_order, q0, s0):
@@ -249,7 +245,7 @@ def build_log_static_data(n, epsilon, j=1.0, h=1.0, sampling="weighted", kappa=1
 
     a_mat, b_mat = build_periodic_ab(n, j, h)
     basis = pauli_basis(n)
-    phi_terms, _ = phi_term(a_mat, b_mat, s0)
+    phi_terms = phi_term(a_mat, b_mat, s0)
     tilde_f_terms = tilde_F_term(phi_terms, kappa, s0, s0)
     identity = np.eye(2**n, dtype=complex)
 
