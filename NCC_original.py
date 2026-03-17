@@ -10,7 +10,12 @@ import numpy as np
 from scipy.linalg import expm
 from tqdm import tqdm
 
-from Pauli_Hamiltonian_BCH import build_periodic_ab, cached_pauli_matrix_from_label, commutator, pauli_decomposition_stream
+from Pauli_Hamiltonian_BCH import (
+    build_periodic_ab,
+    cached_pauli_matrix_from_label,
+    commutator,
+    pauli_decomposition_stream,
+)
 
 
 def parse_args():

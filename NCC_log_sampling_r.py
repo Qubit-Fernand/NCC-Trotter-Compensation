@@ -75,6 +75,7 @@ def sampling_output_path(args, q0, s0) -> Path:
     return output_dir / (f"NCC_log_sampling_r_N{args.N}_T{args.T:g}_eps{args.epsilon:g}_" f"trials{args.trials}_repeats{args.repeats}_q{q0}_s{s0}{suffix}")
 
 
+# In the ouput .npz, split the searched r, seed, and metrics into 2D arrays grouped by repetition, so that it's easier to analyze the search process across repetitions and r values. The lengths array tracks how many valid entries are in each row (since different repetitions may have different numbers of search steps).
 def grouped_search_array(payload: dict, key: str, fill_value, dtype):
     grouped: dict[int, list] = {}
     for item in payload["searches"]:
