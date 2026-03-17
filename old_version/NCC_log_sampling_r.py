@@ -183,13 +183,13 @@ def estimate_total_sample_error(
                     evolution_data["pair_scale"],
                     raw_total,
                 )
-                @ evolution_data["s1"]
+                @ evolution_data["S1"]
                 @ evo
             )
         U_total_average += evo
     U_total_average /= trials
 
-    deterministic = np.linalg.matrix_power(evolution_data["tilde_V"] @ evolution_data["s1"], r)
+    deterministic = np.linalg.matrix_power(evolution_data["tilde_V"] @ evolution_data["S1"], r)
     return {
         "sample_error": float(np.linalg.norm(U_total_average - evolution_data["U_exact"], 2)),
         "sample_fluctuation": float(np.linalg.norm(U_total_average - deterministic, 2)),

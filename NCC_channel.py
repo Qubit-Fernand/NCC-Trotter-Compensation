@@ -204,6 +204,93 @@ def channel_term_max_abs_diff(term_a, term_b) -> float:
     return float(max(abs(term_a.get(key, 0.0 + 0.0j) - term_b.get(key, 0.0 + 0.0j)) for key in all_keys))
 
 
+def decompose_tail_channel_term(term, num_qubits: int, tol=1e-12):
+    """Split a sparse tail channel term into executable pieces when possible."""
+    identity = identity_label(num_qubits)
+    remaining = dict(term)
+    components = []
+
+    identity_coeff = remaining.pop((identity, identity), 0.0 + 0.0j)
+    if abs(identity_coeff) > tol:
+        components.append({"kind": "identity", "coeff": identity_coeff})
+
+    # Direct Pauli conjugation channels rho -> P rho P are already executable.
+    conjugation_keys = [key for key in list(remaining) if key[0] == key[1] and key[0] != identity]
+    for key in conjugation_keys:
+        coeff = remaining.pop(key)
+        if abs(coeff) <= tol:
+            continue
+        components.append(
+            {
+                "kind": "unitary",
+                "coeff": coeff,
+                "unitary": cached_pauli_matrix_from_label(key[0]),
+            }
+        )
+
+    # If a tail term still contains an ad_{iP}-type pair, replace it with
+    # e^{+i pi/4 ad_P} - e^{-i pi/4 ad_P}, which is directly executable.
+    for label in [lbl for lbl in set(left for left, _ in remaining) | set(right for _, right in remaining) if lbl != identity]:
+        left_key = (label, identity)
+        right_key = (identity, label)
+        if left_key not in remaining or right_key not in remaining:
+            continue
+        left_coeff = remaining[left_key]
+        right_coeff = remaining[right_key]
+        if abs(left_coeff + right_coeff) > tol:
+            continue
+        if abs(np.real(left_coeff)) > tol or abs(np.real(right_coeff)) > tol:
+            continue
+
+        magnitude = abs(left_coeff)
+        if magnitude <= tol:
+            remaining.pop(left_key, None)
+            remaining.pop(right_key, None)
+            continue
+
+        phase = left_coeff / (1j * magnitude)
+        W_mat = phase * cached_pauli_matrix_from_label(label)
+        hermitian_err = float(np.linalg.norm(W_mat - W_mat.conj().T, ord="fro"))
+        if hermitian_err > 1e-10:
+            continue
+
+        plus_unitary = (np.eye(2**num_qubits, dtype=complex) + 1j * W_mat) / math.sqrt(2.0)
+        minus_unitary = (np.eye(2**num_qubits, dtype=complex) - 1j * W_mat) / math.sqrt(2.0)
+        components.append({"kind": "unitary", "coeff": magnitude, "unitary": plus_unitary})
+        components.append({"kind": "unitary", "coeff": -magnitude, "unitary": minus_unitary})
+        remaining.pop(left_key, None)
+        remaining.pop(right_key, None)
+
+    # Residual cross terms are kept as general left/right actions.
+    for (left_label, right_label), coeff in sorted(remaining.items()):
+        if abs(coeff) <= tol:
+            continue
+        components.append(
+            {
+                "kind": "general",
+                "coeff": coeff,
+                "left_mat": cached_pauli_matrix_from_label(left_label),
+                "right_mat": cached_pauli_matrix_from_label(right_label),
+            }
+        )
+
+    l1_norm = float(sum(abs(component["coeff"]) for component in components))
+    if l1_norm <= 0:
+        raise ValueError("empty executable tail decomposition")
+    return components, l1_norm
+
+
+def apply_tail_component(component: dict, rho: np.ndarray) -> np.ndarray:
+    """Apply one tail component action to rho."""
+    if component["kind"] == "identity":
+        return rho
+    if component["kind"] == "unitary":
+        return apply_unitary_channel(component["unitary"], rho)
+    if component["kind"] == "general":
+        return component["left_mat"] @ rho @ component["right_mat"]
+    raise ValueError(f"unsupported tail component kind={component['kind']}")
+
+
 def iter_matrix_units(dim: int):
     """Yield the matrix-unit basis E_ij."""
     for row in range(dim):
@@ -220,6 +307,11 @@ def basis_action_distance(action_a, action_b, dim: int) -> float:
         diff = action_a(basis) - action_b(basis)
         max_err = max(max_err, float(np.linalg.norm(diff, ord="fro")))
     return max_err
+
+
+def trace_norm(matrix: np.ndarray) -> float:
+    """Return the trace norm (Schatten-1 norm) of a matrix."""
+    return float(np.sum(np.linalg.svd(matrix, compute_uv=False)))
 
 
 def build_sparse_tilde_F_terms(Phi_channel_terms, num_qubits: int, k_order: int, q0: int, s0: int):
@@ -336,13 +428,11 @@ def build_static_data(n, q0, s0, epsilon=0.01, j=1.0, h=1.0, K=1, max_dense_qubi
                 "antiherm_err": antiherm_err,
             }
         else:
-            coeffs, left_labels, right_labels, l1_norm = channel_term_to_arrays(tilde_F_channel_terms[order])
+            components, l1_norm = decompose_tail_channel_term(tilde_F_channel_terms[order], n)
             tail_orders.append(order)
             F_terms[order] = {
                 "kind": "tail",
-                "coeffs": coeffs,
-                "left_labels": left_labels,
-                "right_labels": right_labels,
+                "components": components,
                 "l1_norm": l1_norm,
             }
 
@@ -383,7 +473,7 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
     tilde_F_channel_terms = static["tilde_F_channel_terms"]
 
     t = t_total / r
-    s1 = expm(-1j * B_mat * t) @ expm(-1j * A_mat * t)
+    S1 = expm(-1j * B_mat * t) @ expm(-1j * A_mat * t)
     step_exact = expm(-1j * h_total * t)
     U_exact = expm(-1j * h_total * t_total)
     V_exact = step_exact @ expm(1j * A_mat * t) @ expm(1j * B_mat * t)
@@ -406,9 +496,9 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
     component_probs = {}
     for order in s_orders:
         data = F_terms[order]
-        probs = np.abs(data["coeffs"]) / data["l1_norm"]
         components = []
         if data["kind"] == "pair":
+            probs = np.abs(data["coeffs"]) / data["l1_norm"]
             for prob, coeff, label in zip(probs, data["coeffs"], data["labels"]):
                 phase = coeff / (1j * abs(coeff))
                 W_mat = phase * cached_pauli_matrix_from_label(label)
@@ -424,18 +514,12 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
                     }
                 )
         else:
-            for prob, coeff, left_label, right_label in zip(
-                probs,
-                data["coeffs"],
-                data["left_labels"],
-                data["right_labels"],
-            ):
+            for component in data["components"]:
                 components.append(
                     {
-                        "prob": float(prob),
-                        "phase": coeff / abs(coeff),
-                        "left_mat": cached_pauli_matrix_from_label(left_label),
-                        "right_mat": cached_pauli_matrix_from_label(right_label),
+                        "prob": float(abs(component["coeff"]) / data["l1_norm"]),
+                        "phase": component["coeff"] / abs(component["coeff"]),
+                        **{key: value for key, value in component.items() if key != "coeff"},
                     }
                 )
         component_data[order] = components
@@ -459,11 +543,11 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
                 if data["kind"] == "pair":
                     out += weight * component["prob"] * apply_pair_component_expectation(component, rho)
                 else:
-                    out += weight * component["prob"] * component["phase"] * (component["left_mat"] @ rho @ component["right_mat"])
+                    out += weight * component["prob"] * component["phase"] * apply_tail_component(component, rho)
         return out
 
     def apply_uncompensated_single_step(rho: np.ndarray) -> np.ndarray:
-        return apply_unitary_channel(s1, rho)
+        return apply_unitary_channel(S1, rho)
 
     def apply_exact_single_step(rho: np.ndarray) -> np.ndarray:
         return apply_unitary_channel(step_exact, rho)
@@ -501,7 +585,7 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
 
     return {
         "t": t,
-        "s1": s1,
+        "S1": S1,
         "step_exact": step_exact,
         "U_exact": U_exact,
         "V_exact": V_exact,
@@ -551,7 +635,7 @@ def sample_channel_then_compensate(
             out = -(component["W_mat"] @ rho @ component["W_mat"])
         return evolution_data["raw_total"] * out
 
-    return evolution_data["raw_total"] * (component["phase"] * (component["left_mat"] @ rho @ component["right_mat"]))
+    return evolution_data["raw_total"] * (component["phase"] * apply_tail_component(component, rho))
 
 
 def sample_compensated_single_step(
@@ -561,7 +645,7 @@ def sample_compensated_single_step(
     rho: np.ndarray,
 ) -> np.ndarray:
     """Sample one full compensated Trotter step and apply it to rho."""
-    rho_after_trotter = apply_unitary_channel(evolution_data["s1"], rho)
+    rho_after_trotter = apply_unitary_channel(evolution_data["S1"], rho)
     order = int(rng.choice(static["s_orders"], p=evolution_data["p_order"]))
     return sample_channel_then_compensate(rng, static, evolution_data, order, rho_after_trotter)
 
@@ -634,10 +718,10 @@ def main():
         return rho_list, average
 
     rho_single_list, rho_single_avg = single_step_channel_sampling(trials)
-    single_step_sample_error = float(np.linalg.norm(rho_single_avg - rho_single_exact, ord="fro"))
-    single_step_fluctuation = float(np.linalg.norm(rho_single_avg - rho_single_deterministic, ord="fro"))
-    single_step_error_before_state = float(np.linalg.norm(rho_single_before - rho_single_exact, ord="fro"))
-    single_step_expectation_bias_state = float(np.linalg.norm(rho_single_deterministic - rho_single_exact, ord="fro"))
+    single_step_sample_error = trace_norm(rho_single_avg - rho_single_exact)
+    single_step_fluctuation = trace_norm(rho_single_avg - rho_single_deterministic)
+    single_step_error_before_state = trace_norm(rho_single_before - rho_single_exact)
+    single_step_expectation_bias_state = trace_norm(rho_single_deterministic - rho_single_exact)
 
     print("single-step state error before:", single_step_error_before_state)
     print("single-step state sample error after compensation:", single_step_sample_error)
@@ -658,10 +742,10 @@ def main():
         return rho_list, average
 
     rho_total_list, rho_total_avg = multi_step_channel_sampling(trials)
-    total_sample_error = float(np.linalg.norm(rho_total_avg - rho_total_exact, ord="fro"))
-    total_sample_fluctuation = float(np.linalg.norm(rho_total_avg - rho_total_deterministic, ord="fro"))
-    total_error_before_state = float(np.linalg.norm(rho_total_before - rho_total_exact, ord="fro"))
-    total_expectation_bias_state = float(np.linalg.norm(rho_total_deterministic - rho_total_exact, ord="fro"))
+    total_sample_error = trace_norm(rho_total_avg - rho_total_exact)
+    total_sample_fluctuation = trace_norm(rho_total_avg - rho_total_deterministic)
+    total_error_before_state = trace_norm(rho_total_before - rho_total_exact)
+    total_expectation_bias_state = trace_norm(rho_total_deterministic - rho_total_exact)
 
     print("total state error before:", total_error_before_state)
     print("multi-step state sample error after compensation:", total_sample_error)

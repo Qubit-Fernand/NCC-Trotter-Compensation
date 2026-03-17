@@ -90,10 +90,10 @@ def exact_ncc_total_error(cache: SystemCache, t_total: float, r: int) -> float:
     eta_sum = eta2 + eta3
     theta = math.atan(eta_sum)
 
-    s1 = expm(-1j * cache.b_mat * t) @ expm(-1j * cache.a_mat * t)
+    S1 = expm(-1j * cache.b_mat * t) @ expm(-1j * cache.a_mat * t)
     v_avg = np.cos(theta) * cache.identity + (np.sin(theta) / eta_sum) * ((t**2 / 2) * cache.c1 + (t**3 / 6) * cache.c2)
     u_exact = expm(-1j * cache.h_total * t_total)
-    return np.linalg.norm(np.linalg.matrix_power(v_avg @ s1, r) - u_exact, 2)
+    return np.linalg.norm(np.linalg.matrix_power(v_avg @ S1, r) - u_exact, 2)
 
 
 def find_min_segments(cache: SystemCache, t_total: float, epsilon: float, r_max: int = 512) -> tuple[int, float]:

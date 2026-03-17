@@ -312,7 +312,7 @@ def build_log_tilde_v(n, t_total, r, epsilon, j=1.0, h=1.0, sampling="weighted",
     order_data = static["order_data"]
 
     t = t_total / r
-    s1 = expm(-1j * b_mat * t) @ expm(-1j * a_mat * t)
+    S1 = expm(-1j * b_mat * t) @ expm(-1j * a_mat * t)
     u_exact = expm(-1j * (a_mat + b_mat) * t_total)
 
     eta = {order: order_data[order]["l1_norm"] * (t**order) for order in s_orders}
@@ -340,7 +340,7 @@ def build_log_tilde_v(n, t_total, r, epsilon, j=1.0, h=1.0, sampling="weighted",
 
     return {
         "tilde_v": tilde_v,
-        "s1": s1,
+        "S1": S1,
         "u_exact": u_exact,
         "eta": eta,
         "eta_pair_sum": eta_pair_sum,
@@ -353,7 +353,7 @@ def build_log_tilde_v(n, t_total, r, epsilon, j=1.0, h=1.0, sampling="weighted",
 def exact_log_total_error(n, t_total, r, epsilon, j=1.0, h=1.0, sampling="weighted", kappa=1, s0=None):
     """Return ||(tilde_V S_1)^r - U_exact||_2 for the deterministic expectation operator."""
     data = build_log_tilde_v(n, t_total, r, epsilon, j=j, h=h, sampling=sampling, kappa=kappa, s0=s0)
-    return np.linalg.norm(np.linalg.matrix_power(data["tilde_v"] @ data["s1"], r) - data["u_exact"], 2)
+    return np.linalg.norm(np.linalg.matrix_power(data["tilde_v"] @ data["S1"], r) - data["u_exact"], 2)
 
 
 def find_min_segments_log(n, t_total, epsilon, j=1.0, h=1.0, sampling="weighted", r_max=512, kappa=1, s0=None):
@@ -431,7 +431,7 @@ def main():
     s_orders = static["s_orders"]
     pairable_orders = static["pairable_orders"]
     non_pairable_orders = static["non_pairable_orders"]
-    s1 = step_data["s1"]
+    S1 = step_data["S1"]
     tilde_v = step_data["tilde_v"]
     u_exact = step_data["u_exact"]
     eta = step_data["eta"]
@@ -503,7 +503,7 @@ def main():
         v_average = sum(v_list) / num_trials
         return v_list, v_average
 
-    single_step_error_before = np.linalg.norm(s1 - expm(-1j * (a_mat + b_mat) * t), 2)
+    single_step_error_before = np.linalg.norm(S1 - expm(-1j * (a_mat + b_mat) * t), 2)
     print("single-step error before:", single_step_error_before)
 
     v_list, v_avg = NCC_sampling(trials)
@@ -521,19 +521,19 @@ def main():
             evo = np.eye(2**n, dtype=complex)
             for _ in range(r):
                 order = int(rng.choice(s_orders, p=p_order))
-                evo = (raw_total * sample_component(order)) @ s1 @ evo
+                evo = (raw_total * sample_component(order)) @ S1 @ evo
             evo_list.append(evo)
         evo_average = sum(evo_list) / num_trials
         return evo_list, evo_average
 
-    total_error_before = np.linalg.norm(np.linalg.matrix_power(s1, r) - u_exact, 2)
+    total_error_before = np.linalg.norm(np.linalg.matrix_power(S1, r) - u_exact, 2)
     print("total error before:", total_error_before)
 
     evo_list, evo_avg = multi_step_NCC_sampling(trials)
 
-    total_sample_fluctuation = np.linalg.norm(evo_avg - np.linalg.matrix_power(tilde_v @ s1, r), 2)
+    total_sample_fluctuation = np.linalg.norm(evo_avg - np.linalg.matrix_power(tilde_v @ S1, r), 2)
     total_sample_error = np.linalg.norm(evo_avg - u_exact, 2)
-    total_expectation_bias = np.linalg.norm(np.linalg.matrix_power(tilde_v @ s1, r) - u_exact, 2)
+    total_expectation_bias = np.linalg.norm(np.linalg.matrix_power(tilde_v @ S1, r) - u_exact, 2)
 
     print("multi-step sample error after compensation:", total_sample_error)
     print("multi-step sample fluctuation:", total_sample_fluctuation)
@@ -546,7 +546,7 @@ def main():
         out,
         A=a_mat,
         B=b_mat,
-        S=s1,
+        S=S1,
         V_tilde=tilde_v,
         V_tilde_taylor=tilde_v_taylor,
         V_exact=v_exact,

@@ -198,8 +198,8 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-8):
     tilde_F_channel_terms = static["tilde_F_channel_terms"]
 
     t = t_total / r
-    s1 = expm(-1j * B_mat * t) @ expm(-1j * A_mat * t)
-    s1_channel = channel_from_unitary(s1)
+    S1 = expm(-1j * B_mat * t) @ expm(-1j * A_mat * t)
+    S1_channel = channel_from_unitary(S1)
     step_exact = expm(-1j * h_total * t)
     step_exact_channel = channel_from_unitary(step_exact)
     U_exact = expm(-1j * h_total * t_total)
@@ -242,13 +242,13 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-8):
     if validation_error > validation_tol:
         raise ValueError(f"channel tilde_V mismatch between compensation sum and Taylor sum: {validation_error:.3e}")
 
-    deterministic = np.linalg.matrix_power(tilde_V @ s1_channel, r)
+    deterministic = np.linalg.matrix_power(tilde_V @ S1_channel, r)
     deterministic_bias = float(np.linalg.norm(deterministic - U_exact_channel, 2))
 
     return {
         "t": t,
-        "s1": s1,
-        "s1_channel": s1_channel,
+        "S1": S1,
+        "S1_channel": S1_channel,
         "step_exact_channel": step_exact_channel,
         "U_exact_channel": U_exact_channel,
         "V_exact_channel": V_exact_channel,
@@ -351,7 +351,7 @@ def main():
         return V_list, average
 
     single_step_error_before = np.linalg.norm(
-        evolution_data["s1_channel"] - evolution_data["step_exact_channel"],
+        evolution_data["S1_channel"] - evolution_data["step_exact_channel"],
         2,
     )
     print("single-step channel error before:", single_step_error_before)
@@ -372,7 +372,7 @@ def main():
             evo = static["identity_super"].copy()
             for _ in range(r):
                 order = int(rng.choice(static["s_orders"], p=p_order))
-                evo = sample_channel_then_compensate(rng, static, evolution_data, order) @ evolution_data["s1_channel"] @ evo
+                evo = sample_channel_then_compensate(rng, static, evolution_data, order) @ evolution_data["S1_channel"] @ evo
             average += evo
             if U_total_list is not None:
                 U_total_list.append(evo)
@@ -380,7 +380,7 @@ def main():
         return U_total_list, average
 
     total_error_before = np.linalg.norm(
-        np.linalg.matrix_power(evolution_data["s1_channel"], r) - evolution_data["U_exact_channel"],
+        np.linalg.matrix_power(evolution_data["S1_channel"], r) - evolution_data["U_exact_channel"],
         2,
     )
     print("total channel error before:", total_error_before)
@@ -399,7 +399,7 @@ def main():
     out = data_dir / f"results_channel_trials{trials}_q{q0}_s{s0}.npz"
 
     output_payload = dict(
-        S=evolution_data["s1_channel"],
+        S=evolution_data["S1_channel"],
         V_tilde=evolution_data["tilde_V"],
         V_exact=evolution_data["V_exact_channel"],
         V_average=V_avg,

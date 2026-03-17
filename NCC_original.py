@@ -67,7 +67,7 @@ def build_tilde_V(static, t_total: float, r: int, validation_tol=1e-10):
     if eta_sum <= 0:
         raise ValueError("eta_sum must be positive")
     p_s = np.array([eta2 / eta_sum, eta3 / eta_sum], dtype=float)
-    s1 = expm(-1j * static["B_mat"] * t) @ expm(-1j * static["A_mat"] * t)
+    S1 = expm(-1j * static["B_mat"] * t) @ expm(-1j * static["A_mat"] * t)
     U_exact = expm(-1j * static["h_total"] * t_total)
 
     tilde_V = np.zeros_like(static["identity"])
@@ -87,7 +87,7 @@ def build_tilde_V(static, t_total: float, r: int, validation_tol=1e-10):
     if validation_error > validation_tol:
         raise ValueError(f"tilde_V mismatch between compensation sum and Taylor sum: {validation_error:.3e}")
 
-    deterministic = np.linalg.matrix_power(tilde_V @ s1, r)
+    deterministic = np.linalg.matrix_power(tilde_V @ S1, r)
     deterministic_bias = float(np.linalg.norm(deterministic - U_exact, 2))
 
     return {
@@ -96,7 +96,7 @@ def build_tilde_V(static, t_total: float, r: int, validation_tol=1e-10):
         "eta_sum": eta_sum,
         "eta2": eta2,
         "eta3": eta3,
-        "s1": s1,
+        "S1": S1,
         "U_exact": U_exact,
         "tilde_V": tilde_V,
         # "tilde_V_taylor": tilde_V_taylor,
@@ -128,7 +128,7 @@ def main():
     B = static["B_mat"]
 
     # note the order of exp(A) and exp(B)
-    S = evolution_data["s1"]
+    S = evolution_data["S1"]
     V_exact = expm(-1j * static["h_total"] * t) @ expm(1j * A * t) @ expm(1j * B * t)
     tilde_V = evolution_data["tilde_V"]
     S_r = np.linalg.matrix_power(S, r)

@@ -114,7 +114,7 @@ def build_tilde_V(
     K = static["K"]
 
     t = t_total / r
-    s1 = expm(-1j * B_mat * t) @ expm(-1j * A_mat * t)
+    S1 = expm(-1j * B_mat * t) @ expm(-1j * A_mat * t)
     U_exact = expm(-1j * (A_mat + B_mat) * t_total)
 
     eta = {order: F_terms[order]["l1_norm"] * (t**order) for order in s_orders}
@@ -155,12 +155,12 @@ def build_tilde_V(
 
     # This is the total deterministic bias for r repeated compensated steps,
     # not the single-step tilde_V object built above.
-    deterministic = np.linalg.matrix_power(tilde_V @ s1, r)
+    deterministic = np.linalg.matrix_power(tilde_V @ S1, r)
     deterministic_bias = float(np.linalg.norm(deterministic - U_exact, 2))
 
     return {
         "tilde_V": tilde_V,
-        "s1": s1,
+        "S1": S1,
         "U_exact": U_exact,
         "deterministic": deterministic,
         "deterministic_bias": deterministic_bias,
@@ -220,7 +220,7 @@ def main():
     s_orders = static["s_orders"]
     pairable_orders = static["pairable_orders"]
     non_pairable_orders = static["non_pairable_orders"]
-    s1 = evolution_data["s1"]
+    S1 = evolution_data["S1"]
     tilde_V = evolution_data["tilde_V"]
     U_exact = evolution_data["U_exact"]
     eta = evolution_data["eta"]
@@ -277,7 +277,7 @@ def main():
         v_average /= num_trials
         return V_list, v_average
 
-    single_step_error_before = np.linalg.norm(s1 - expm(-1j * (A_mat + B_mat) * t), 2)
+    single_step_error_before = np.linalg.norm(S1 - expm(-1j * (A_mat + B_mat) * t), 2)
     print("single-step error before:", single_step_error_before)
 
     V_list, V_avg = NCC_sampling(trials)
@@ -296,14 +296,14 @@ def main():
             evo = np.eye(2**n, dtype=complex)
             for _ in range(r):
                 order = int(rng.choice(s_orders, p=p_order))
-                evo = sample_Pauli_then_compensate_exp(order) @ s1 @ evo
+                evo = sample_Pauli_then_compensate_exp(order) @ S1 @ evo
             U_total_average += evo
             if U_total_list is not None:
                 U_total_list.append(evo)
         U_total_average /= num_trials
         return U_total_list, U_total_average
 
-    total_error_before = np.linalg.norm(np.linalg.matrix_power(s1, r) - U_exact, 2)
+    total_error_before = np.linalg.norm(np.linalg.matrix_power(S1, r) - U_exact, 2)
     print("total error before:", total_error_before)
 
     U_total_list, evo_avg = multi_step_NCC_sampling(trials)
@@ -322,7 +322,7 @@ def main():
     output_payload = dict(
         A=A_mat,
         B=B_mat,
-        S=s1,
+        S=S1,
         V_tilde=tilde_V,
         V_exact=V_exact,
         V_average=V_avg,
