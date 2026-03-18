@@ -20,6 +20,69 @@ FIXED_N="${FIXED_N:-8}"
 FIXED_T="${FIXED_T:-2.0}"
 FIXED_EPSILON="${FIXED_EPSILON:-0.001}"
 
+usage() {
+  cat <<'EOF'
+Usage: bash run.sh [--mode MODE[,MODE...]]
+
+Modes:
+  original
+  log
+
+Examples:
+  bash run.sh
+  bash run.sh --mode log
+  bash run.sh --mode original,log
+EOF
+}
+
+parse_modes() {
+  local raw="$1"
+  local mode
+  local parsed=()
+  IFS=',' read -r -a parsed <<< "$raw"
+  MODES=()
+  for mode in "${parsed[@]}"; do
+    case "$mode" in
+      original|log)
+        MODES+=("$mode")
+        ;;
+      *)
+        echo "Unknown mode: $mode" >&2
+        usage >&2
+        exit 1
+        ;;
+    esac
+  done
+  if [ "${#MODES[@]}" -eq 0 ]; then
+    echo "No valid modes provided." >&2
+    usage >&2
+    exit 1
+  fi
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --mode)
+      if [ "$#" -lt 2 ]; then
+        echo "--mode requires an argument." >&2
+        usage >&2
+        exit 1
+      fi
+      parse_modes "$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
 mkdir -p "$OUT_DIR"
 
 run_case() {
