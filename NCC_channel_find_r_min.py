@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from NCC_channel import build_static_data, build_tilde_V, sample_compensated_single_step, zero_density_matrix
+from NCC_channel_normal import build_static_data, build_tilde_V, sample_compensated_single_step, zero_density_matrix
 
 
 def build_parser():

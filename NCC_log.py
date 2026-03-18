@@ -60,10 +60,14 @@ def build_static_data(n, q0, s0, epsilon=0.01, j=1.0, h=1.0, K=1):
     tilde_F_l1 = {}
     pairable_orders = []
     non_pairable_orders = []
+    leading_orders = list(range(K + 1, min(s0, 2 * K + 1) + 1))
     for order in range(K + 1, s0 + 1):
         coeffs, labels, l1_norm = pauli_decomposition_stream(tilde_F_terms[order])
         F_terms[order] = {"kind": "tail", "coeffs": coeffs, "labels": labels, "l1_norm": l1_norm}
         tilde_F_l1[order] = l1_norm
+
+        if order > 2 * K + 1:
+            continue
 
         antiherm_err = np.linalg.norm(
             tilde_F_terms[order] + tilde_F_terms[order].conj().T,
@@ -93,6 +97,7 @@ def build_static_data(n, q0, s0, epsilon=0.01, j=1.0, h=1.0, K=1):
         "tilde_F_l1": tilde_F_l1,
         "F_terms": F_terms,
         "s_orders": list(range(K + 1, s0 + 1)),
+        "leading_orders": leading_orders,
         "pairable_orders": pairable_orders,
         "non_pairable_orders": non_pairable_orders,
         "K": K,

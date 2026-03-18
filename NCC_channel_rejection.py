@@ -1,3 +1,5 @@
+'''follow pseudocode'''
+
 import argparse
 import math
 from functools import lru_cache
@@ -6,7 +8,7 @@ import numpy as np
 from scipy.linalg import expm
 from tqdm import tqdm
 
-from NCC_channel import apply_channel_term, trace_norm, zero_density_matrix
+from NCC_channel_normal import apply_channel_term, trace_norm, zero_density_matrix
 from Pauli_Hamiltonian_BCH import build_periodic_ab, cached_pauli_matrix_from_label, phi_term, tilde_F_term
 
 
@@ -271,7 +273,7 @@ def exact_tail_action_on_rho(n: int, q0: int, s0: int, coupling_j: float, field_
     A_mat, B_mat = build_periodic_ab(n, coupling_j, field_h)
     phi_terms = phi_term(A_mat, B_mat, q0)
     tilde_F_operator_terms = tilde_F_term(phi_terms, K, q0, s0)
-    from NCC_channel import channel_term_from_operator_pauli, build_sparse_tilde_F_terms
+    from NCC_channel_normal import channel_term_from_operator_pauli, build_sparse_tilde_F_terms
     from Pauli_Hamiltonian_BCH import pauli_decomposition_stream
 
     phi_channel_terms = {}
