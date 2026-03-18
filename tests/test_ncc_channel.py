@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from NCC_channel import build_static_data, build_tilde_V
+from NCC_channel_normal import build_static_data, build_tilde_V
 
 
 def test_ncc_channel_action_on_rho_smoke():

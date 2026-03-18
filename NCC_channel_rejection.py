@@ -8,7 +8,12 @@ import numpy as np
 from scipy.linalg import expm
 from tqdm import tqdm
 
-from NCC_channel_normal import apply_channel_term, trace_norm, zero_density_matrix
+from NCC_channel_normal import (
+    apply_channel_term,
+    build_static_data as build_channel_static_data,
+    build_tilde_V as build_channel_tilde_V,
+    trace_norm,
+)
 from Pauli_Hamiltonian_BCH import build_periodic_ab, cached_pauli_matrix_from_label, phi_term, tilde_F_term
 
 
@@ -24,6 +29,12 @@ def parse_args():
     parser.add_argument("--epsilon", type=float, default=0.1, help="target precision used for q0/s0 defaults")
     parser.add_argument("--q0", type=int, default=0, help="BCH truncation order")
     parser.add_argument("--s0", type=int, default=0, help="compensation truncation order")
+    parser.add_argument(
+        "--initial_state",
+        choices=("plus_zero", "zero"),
+        default="plus_zero",
+        help="state used for the single-step sanity check",
+    )
     return parser.parse_args()
 
 
@@ -33,6 +44,20 @@ def commutator(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 def support_from_label(label):
     return frozenset(index for index, entry in enumerate(label) if entry != 0)
+
+
+def initial_density_matrix(num_qubits: int, kind: str) -> np.ndarray:
+    """Return a small-state sanity-check density matrix."""
+    dim = 2**num_qubits
+    psi = np.zeros(dim, dtype=complex)
+    if kind == "zero":
+        psi[0] = 1.0
+    elif kind == "plus_zero":
+        psi[0] = 1.0 / math.sqrt(2.0)
+        psi[1] = 1.0 / math.sqrt(2.0)
+    else:
+        raise ValueError(f"unsupported initial_state={kind}")
+    return np.outer(psi, psi.conj())
 
 
 def heisenberg_ab_term_specs(n: int, coupling_j: float, field_h: float):
@@ -298,9 +323,27 @@ def main():
     s0 = max(4, s0)
     x = args.T / args.r
 
+    static = build_channel_static_data(
+        n=args.N,
+        q0=q0,
+        s0=s0,
+        epsilon=args.epsilon,
+        j=args.J,
+        h=args.h,
+        K=K,
+        max_dense_qubits=max(3, args.N),
+    )
+    evolution_data = build_channel_tilde_V(static, args.T, args.r)
+
     layers = build_rejection_layers(args.N, args.J, args.h)
-    rho0 = zero_density_matrix(args.N)
+    rho0 = initial_density_matrix(args.N, args.initial_state)
     exact_tail = exact_tail_action_on_rho(args.N, q0, s0, args.J, args.h, K, x, rho0)
+
+    rho_single_before = evolution_data["apply_uncompensated_single_step"](rho0)
+    rho_single_exact = evolution_data["apply_exact_single_step"](rho0)
+    rho_single_compensated = evolution_data["apply_compensated_single_step"](rho0)
+    before_error = trace_norm(rho_single_before - rho_single_exact)
+    after_error = trace_norm(rho_single_compensated - rho_single_exact)
 
     rng = np.random.default_rng(args.seed)
     average = np.zeros_like(rho0)
@@ -323,7 +366,10 @@ def main():
 
     print("Prototype rejection pseudocode implementation:", True)
     print("N:", args.N, "q0:", q0, "s0:", s0, "r:", args.r, "x:", x)
+    print("initial_state:", args.initial_state)
     print("layers:", len(layers), "tail starts at s =", 2 * K + 2)
+    print("single-step Trotter error before compensation:", before_error)
+    print("single-step error after exact channel compensation:", after_error)
     print("normalization:", normalization)
     print("trace-norm error vs exact tail+identity action:", trace_norm(average - exact_tail))
 
