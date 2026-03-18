@@ -29,6 +29,12 @@ def parse_args():
     parser.add_argument("--epsilon", type=float, default=0.1, help="target precision used for q0/s0 defaults")
     parser.add_argument("--q0", type=int, default=0, help="BCH truncation order")
     parser.add_argument("--s0", type=int, default=0, help="compensation truncation order")
+    parser.add_argument("--diagnostic_trials", type=int, default=50000, help="trials used for acceptance-rate diagnostics")
+    parser.add_argument(
+        "--disable_outer_importance",
+        action="store_true",
+        help="disable importance-sampled outer distribution over (s, j, q_tuple)",
+    )
     parser.add_argument(
         "--initial_state",
         choices=("plus_zero", "zero"),
@@ -280,6 +286,7 @@ def ncc_sample_rejection(
     K: int,
     x: float,
     amax_kappa_plus_one: float,
+    outer_probs=None,
 ):
     """Algorithm 3: sample the higher-order rejection-compensation unitary."""
     entries = rejection_raw_entries(q0, s0, K, n, k_local, g, amax_kappa_plus_one, x)
@@ -291,11 +298,16 @@ def ncc_sample_rejection(
         return np.eye(dim, dtype=complex), 1.0, normalization
 
     weights = np.array([weight for _, _, _, weight in entries], dtype=float)
-    probs = weights / raw_total
-    _, j_parts, q_tuple = entries[int(rng.choice(len(entries), p=probs))][:3]
+    if outer_probs is None:
+        probs = weights / raw_total
+    else:
+        probs = outer_probs
+    chosen_index = int(rng.choice(len(entries), p=probs))
+    _, j_parts, q_tuple, chosen_weight = entries[chosen_index]
+    branch_scale = chosen_weight / (raw_total * probs[chosen_index])
 
     V = np.eye(dim, dtype=complex)
-    eta = 1.0
+    eta = branch_scale
     for q in q_tuple[:j_parts]:
         sampled_unitary, sampled_sign = bch_sample(rng, layers, n, k_local, g, amax_kappa_plus_one, q)
         if sampled_unitary is None:
@@ -353,6 +365,89 @@ def single_step_trotter_error(
     )
 
 
+def estimate_rejection_diagnostics(
+    n: int,
+    layers,
+    k_local: int,
+    g: float,
+    q0: int,
+    s0: int,
+    K: int,
+    x: float,
+    amax_kappa_plus_one: float,
+    diagnostic_trials: int,
+):
+    """Estimate BCHSample acceptance rates and full-sampler nonzero rate."""
+    diagnostics = {}
+    for q in range(K + 1, q0 + 1):
+        rng = np.random.default_rng(1000 + q)
+        accepted = 0
+        for _ in range(diagnostic_trials):
+            unitary, eta = bch_sample(rng, layers, n, k_local, g, amax_kappa_plus_one, q)
+            if unitary is not None:
+                accepted += 1
+        diagnostics[q] = accepted / diagnostic_trials
+
+    rng = np.random.default_rng(2026)
+    identity = 0
+    nonzero = 0
+    identity_matrix = np.eye(2**n, dtype=complex)
+    for _ in range(diagnostic_trials):
+        unitary, eta, _ = ncc_sample_rejection(
+            rng,
+            layers,
+            n,
+            k_local,
+            g,
+            q0,
+            s0,
+            K,
+            x,
+            amax_kappa_plus_one,
+        )
+        if eta == 0.0:
+            continue
+        if np.allclose(unitary, identity_matrix):
+            identity += 1
+        else:
+            nonzero += 1
+    nonzero_rate = nonzero / diagnostic_trials
+    estimated_trials_for_ten_nonzero = math.inf if nonzero_rate == 0.0 else math.ceil(10.0 / nonzero_rate)
+    return {
+        "bch_acceptance_rates": diagnostics,
+        "identity_rate": identity / diagnostic_trials,
+        "nonzero_rate": nonzero_rate,
+        "estimated_trials_for_ten_nonzero": estimated_trials_for_ten_nonzero,
+    }
+
+
+def build_outer_importance_distribution(
+    q0: int,
+    s0: int,
+    K: int,
+    n: int,
+    k_local: int,
+    g: float,
+    amax_kappa_plus_one: float,
+    x: float,
+    bch_acceptance_rates,
+    diagnostic_trials: int,
+):
+    """Proposal over (s, j, q_tuple) biased by estimated BCHSample success rates."""
+    entries = rejection_raw_entries(q0, s0, K, n, k_local, g, amax_kappa_plus_one, x)
+    fallback_rate = 1.0 / diagnostic_trials
+    scores = []
+    for _, j_parts, q_tuple, weight in entries:
+        estimated_success = 1.0
+        for q in q_tuple[:j_parts]:
+            estimated_success *= max(bch_acceptance_rates.get(q, 0.0), fallback_rate)
+        scores.append(weight * estimated_success)
+    total_score = float(sum(scores))
+    if total_score <= 0.0:
+        return np.array([weight for _, _, _, weight in entries], dtype=float) / sum(weight for _, _, _, weight in entries)
+    return np.array(scores, dtype=float) / total_score
+
+
 def main():
     args = parse_args()
     K = 1
@@ -368,6 +463,32 @@ def main():
     rho0 = initial_density_matrix(args.N, args.initial_state)
     V_exact = V_exact_action_on_rho(args.N, q0, s0, args.J, args.h, K, x, rho0)
     sample_error_before, expectation_bias, _ = single_step_trotter_error(args, q0, s0, K, rho0)
+    diagnostics = estimate_rejection_diagnostics(
+        n=args.N,
+        layers=layers,
+        k_local=k_local,
+        g=g,
+        q0=q0,
+        s0=s0,
+        K=K,
+        x=x,
+        amax_kappa_plus_one=2.0,
+        diagnostic_trials=args.diagnostic_trials,
+    )
+    outer_probs = None
+    if not args.disable_outer_importance:
+        outer_probs = build_outer_importance_distribution(
+            q0=q0,
+            s0=s0,
+            K=K,
+            n=args.N,
+            k_local=k_local,
+            g=g,
+            amax_kappa_plus_one=2.0,
+            x=x,
+            bch_acceptance_rates=diagnostics["bch_acceptance_rates"],
+            diagnostic_trials=args.diagnostic_trials,
+        )
 
     rng = np.random.default_rng(args.seed)
     average = np.zeros_like(rho0)
@@ -384,6 +505,7 @@ def main():
             K,
             x,
             amax_kappa_plus_one=2.0,
+            outer_probs=outer_probs,
         )
         average += normalization * eta * (unitary @ rho0 @ unitary.conj().T)
     average /= args.trials
@@ -398,6 +520,11 @@ def main():
     print("expectation_bias:", expectation_bias)
     print("normalization:", normalization)
     print("sample_fluctuations:", sample_fluctuation)
+    print("bch_acceptance_rates:", diagnostics["bch_acceptance_rates"])
+    print("identity_rate:", diagnostics["identity_rate"])
+    print("nonzero_rate:", diagnostics["nonzero_rate"])
+    print("estimated_trials_for_10_nonzero_samples:", diagnostics["estimated_trials_for_ten_nonzero"])
+    print("outer_importance_enabled:", not args.disable_outer_importance)
 
 
 if __name__ == "__main__":
