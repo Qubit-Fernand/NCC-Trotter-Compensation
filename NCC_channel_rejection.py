@@ -31,11 +31,6 @@ def parse_args():
     parser.add_argument("--s0", type=int, default=0, help="compensation truncation order")
     parser.add_argument("--diagnostic_trials", type=int, default=50000, help="trials used for acceptance-rate diagnostics")
     parser.add_argument(
-        "--disable_outer_importance",
-        action="store_true",
-        help="disable importance-sampled outer distribution over (s, j, q_tuple)",
-    )
-    parser.add_argument(
         "--initial_state",
         choices=("plus_zero", "zero"),
         default="plus_zero",
@@ -62,6 +57,7 @@ def initial_density_matrix(num_qubits: int, kind: str) -> np.ndarray:
     return np.outer(psi, psi.conj())
 
 
+@lru_cache(maxsize=None)
 def heisenberg_ab_term_specs(n: int, coupling_j: float, field_h: float):
     """Return local Pauli-term specifications for the periodic A/B partition."""
     terms_a = []
@@ -90,60 +86,61 @@ def heisenberg_ab_term_specs(n: int, coupling_j: float, field_h: float):
         add_two_body(terms_b, site, 3)
         add_field(terms_b, site)
 
-    return terms_a, terms_b
+    return tuple(terms_a), tuple(terms_b)
 
 
 def heisenberg_extensiveness_g(coupling_j: float, field_h: float) -> float:
-    """Physical g for the 1D Heisenberg model under the user's convention."""
+    """Physical g_0 for the 1D Heisenberg model under the user's convention."""
     return 6.0 * coupling_j + field_h
 
 
-def build_rejection_layers(n: int, coupling_j: float, field_h: float):
-    """Build the three BCH-input Hamiltonians H1=H, H2=-A, H3=-B for V = U S1^†."""
+@lru_cache(maxsize=None)
+def build_static(n: int, coupling_j: float, field_h: float):
+    """Build x-independent BCH input data for repeated rejection sampling runs."""
     terms_a, terms_b = heisenberg_ab_term_specs(n, coupling_j, field_h)
-    terms_total = [(alpha, cached_pauli_matrix_from_label(label), support_from_label(label)) for alpha, label in terms_a + terms_b]
 
-    def to_layer_records(specs, layer_index, negative=False):
-        records = []
+    def to_term_paulis(specs, term_index, negative=False):
+        paulis = []
         for gamma, (alpha, label) in enumerate(specs):
             pauli = cached_pauli_matrix_from_label(label)
             if negative:
                 pauli = -pauli
-            records.append(
+            paulis.append(
                 {
-                    "alpha": float(alpha),
+                    "alpha_0": float(alpha),
                     "matrix": pauli,
                     "support": support_from_label(label),
-                    "layer": layer_index,
+                    "term": term_index,
                     "gamma": gamma,
                 }
             )
-        return records
+        return tuple(paulis)
 
-    layers = [
-        [
-            {
-                "alpha": alpha,
-                "matrix": pauli,
-                "support": support,
-                "layer": 1,
-                "gamma": gamma,
-            }
-            for gamma, (alpha, pauli, support) in enumerate(terms_total)
-        ],
-        to_layer_records(terms_a, 2, negative=True),
-        [
-            {
-                "alpha": alpha,
-                "matrix": -cached_pauli_matrix_from_label(label),
-                "support": support_from_label(label),
-                "layer": 3,
-                "gamma": gamma,
-            }
-            for gamma, (alpha, label) in enumerate(terms_b)
-        ],
-    ]
-    return layers
+    static = (
+        to_term_paulis(terms_a + terms_b, 1),  # term 1
+        to_term_paulis(terms_a, 2, negative=True),  # term 2
+        to_term_paulis(terms_b, 3, negative=True),  # term 3
+    )
+    return static
+
+
+def build_tilde_H_v(static, x: float):
+    """Build the scaled BCH-input Hamiltonians {x \\tilde H_v} from cached static data."""
+    tilde_H_v = []
+    for term_family in static:
+        tilde_H_v.append(
+            [
+                {
+                    "alpha": float(x * pauli_term["alpha_0"]),
+                    "matrix": pauli_term["matrix"],
+                    "support": pauli_term["support"],
+                    "term": pauli_term["term"],
+                    "gamma": pauli_term["gamma"],
+                }
+                for pauli_term in term_family
+            ]
+        )
+    return tilde_H_v
 
 
 def iter_compositions(total, parts, lower, upper):
@@ -168,14 +165,14 @@ def sigma_coefficient(perm):
 def sample_consistent_permutation(rng: np.random.Generator, v_sequence):
     """Uniformly sample sigma from Sigma_v in Eq. (21)."""
     q = len(v_sequence)
-    positions_by_layer = {}
-    for index, layer in enumerate(v_sequence):
-        positions_by_layer.setdefault(layer, []).append(index)
+    positions_by_term = {}
+    for index, term in enumerate(v_sequence):
+        positions_by_term.setdefault(term, []).append(index)
 
     sigma = [None] * q
     offset = 0
-    for layer in sorted(positions_by_layer):
-        targets = positions_by_layer[layer]
+    for term in sorted(positions_by_term):
+        targets = positions_by_term[term]
         sampled_targets = list(rng.permutation(targets))
         for local_index, target in enumerate(sampled_targets):
             sigma[offset + local_index] = int(target)
@@ -185,29 +182,27 @@ def sample_consistent_permutation(rng: np.random.Generator, v_sequence):
 
 def lc_sample(
     rng: np.random.Generator,
-    layers,
+    tilde_H_v,
     n: int,
     k_local: int,
-    g: float,
-    amax_kappa_plus_one: float,
+    g_v: float,
     q: int,
 ):
     """Algorithm 2: light-cone commutator sampling."""
-    all_terms = [term for layer in layers for term in layer]
+    all_terms = [pauli_term for term_family in tilde_H_v for pauli_term in term_family]
     total_weight = float(sum(term["alpha"] for term in all_terms))
 
     first_probs = np.array([term["alpha"] / total_weight for term in all_terms], dtype=float)
     first_term = all_terms[int(rng.choice(len(all_terms), p=first_probs))]
 
-    # The PDF's step 3 and correctness text disagree; we follow the correctness proof.
-    if rng.random() > total_weight / (n * g):
+    if rng.random() > total_weight / (n * g_v):
         return None
 
-    sequence = [first_term["layer"]]
+    sequence = [first_term["term"]]
     current = 1j * first_term["matrix"]
     active_support = set(first_term["support"])
-    candidate_keys = {(term["layer"], term["gamma"]) for term in all_terms if active_support & term["support"]}
-    term_lookup = {(term["layer"], term["gamma"]): term for term in all_terms}
+    candidate_keys = {(term["term"], term["gamma"]) for term in all_terms if active_support & term["support"]}
+    term_lookup = {(term["term"], term["gamma"]): term for term in all_terms}
 
     for depth in range(2, q + 1):
         candidates = [term_lookup[key] for key in sorted(candidate_keys)]
@@ -215,31 +210,30 @@ def lc_sample(
         probs = np.array([term["alpha"] / local_weight for term in candidates], dtype=float)
         next_term = candidates[int(rng.choice(len(candidates), p=probs))]
 
-        if rng.random() > local_weight / (depth * k_local * amax_kappa_plus_one * g):
+        if rng.random() > local_weight / (depth * k_local * g_v):
             return None
 
         updated = commutator(1j * next_term["matrix"], current)
         if np.linalg.norm(updated, ord="fro") <= 1e-12:
             return None
         current = updated / 2.0
-        sequence.append(next_term["layer"])
+        sequence.append(next_term["term"])
         active_support |= set(next_term["support"])
-        candidate_keys |= {(term["layer"], term["gamma"]) for term in all_terms if set(term["support"]) & active_support}
+        candidate_keys |= {(term["term"], term["gamma"]) for term in all_terms if set(term["support"]) & active_support}
 
     return tuple(sequence), current
 
 
 def bch_sample(
     rng: np.random.Generator,
-    layers,
+    tilde_H_v,
     n: int,
     k_local: int,
-    g: float,
-    amax_kappa_plus_one: float,
+    g_v: float,
     q: int,
 ):
     """Algorithm 1: sample one BCH term and return a unitary and sign."""
-    res = lc_sample(rng, layers, n, k_local, g, amax_kappa_plus_one, q)
+    res = lc_sample(rng, tilde_H_v, n, k_local, g_v, q)
     if res is None:
         return None, 0.0
 
@@ -251,7 +245,7 @@ def bch_sample(
     if rng.random() > abs(coeff):
         return None, 0.0
 
-    P = -1j * iP
+    P = -1j * iP  # recover P from anti-Hermitian iP
     if rng.random() < 0.5:
         unitary = expm(1j * math.pi / 4 * P)
     else:
@@ -261,65 +255,60 @@ def bch_sample(
 
 
 @lru_cache(maxsize=None)
-def rejection_raw_entries(q0: int, s0: int, K: int, n: int, k_local: int, g: float, amax_kappa_plus_one: float, x: float):
+def raw_weight_s_and_q(q0: int, s0: int, K: int, n: int, k_local: int, g_v: float):
     """Unnormalized weights for the full truncated expansion from order K+1 to s0."""
-    entries = []
+    raw_weights = []
     for s in range(K + 1, s0 + 1):
         max_parts = s // (K + 1)
         for j in range(1, max_parts + 1):
             for q_tuple in iter_compositions(s, j, K + 1, q0):
                 weight = 1.0 / math.factorial(j)
                 for q in q_tuple:
-                    weight *= 2.0 * math.factorial(q) * (2.0 * amax_kappa_plus_one * k_local * g) ** (q - 1) * n * g * (x**q)
-                entries.append((s, j, q_tuple, float(weight)))
-    return tuple(entries)
+                    weight *= math.factorial(q) * (2.0 * k_local * g_v) ** q * (1.0 / k_local) * n
+                raw_weights.append((s, j, q_tuple, float(weight)))
+    return tuple(raw_weights)
 
 
 def ncc_sample_rejection(
     rng: np.random.Generator,
-    layers,
+    tilde_H_v,
     n: int,
     k_local: int,
-    g: float,
+    g_v: float,
     q0: int,
     s0: int,
     K: int,
-    x: float,
-    amax_kappa_plus_one: float,
-    outer_probs=None,
 ):
     """Algorithm 3: sample the higher-order rejection-compensation unitary."""
-    entries = rejection_raw_entries(q0, s0, K, n, k_local, g, amax_kappa_plus_one, x)
+    raw_weights = raw_weight_s_and_q(q0, s0, K, n, k_local, g_v)
     dim = 2**n
-    raw_total = float(sum(weight for _, _, _, weight in entries))
-    normalization = 1.0 + raw_total
+    raw_total = float(sum(weight for _, _, _, weight in raw_weights))
+    total_1_norm = 1.0 + raw_total
 
-    if rng.random() < 1.0 / normalization:
-        return np.eye(dim, dtype=complex), 1.0, normalization
+    if rng.random() < 1.0 / total_1_norm:
+        return np.eye(dim, dtype=complex), 1.0, total_1_norm
 
-    weights = np.array([weight for _, _, _, weight in entries], dtype=float)
-    if outer_probs is None:
-        probs = weights / raw_total
-    else:
-        probs = outer_probs
-    chosen_index = int(rng.choice(len(entries), p=probs))
-    _, j_parts, q_tuple, chosen_weight = entries[chosen_index]
-    branch_scale = chosen_weight / (raw_total * probs[chosen_index])
+    weights = np.array([weight for _, _, _, weight in raw_weights], dtype=float)
+    probs = weights / raw_total
+    chosen_index = int(rng.choice(len(raw_weights), p=probs))
+    _, j_parts, q_tuple, _ = raw_weights[chosen_index]
 
     V = np.eye(dim, dtype=complex)
-    eta = branch_scale
+    eta = 1.0
     for q in q_tuple[:j_parts]:
-        sampled_unitary, sampled_sign = bch_sample(rng, layers, n, k_local, g, amax_kappa_plus_one, q)
+        sampled_unitary, sampled_sign = bch_sample(rng, tilde_H_v, n, k_local, g_v, q)
         if sampled_unitary is None:
-            return np.zeros((dim, dim), dtype=complex), 0.0, normalization
+            return np.zeros((dim, dim), dtype=complex), 0.0, total_1_norm
         eta *= sampled_sign
         V = sampled_unitary @ V
-    return V, eta, normalization
+    return V, eta, total_1_norm
 
 
 def V_exact_action_on_rho(n: int, q0: int, s0: int, coupling_j: float, field_h: float, K: int, x: float, rho: np.ndarray):
-    """Exact truncated action I + sum_{s=K+1}^{s0} \\widetilde F_{K,s}(x) on rho."""
+    """Exact truncated action I + sum_{s=K+1}^{s0} \\widetilde F_{K,s} on rho with x absorbed."""
     A_mat, B_mat = build_periodic_ab(n, coupling_j, field_h)
+    A_mat = x * A_mat
+    B_mat = x * B_mat
     phi_terms = phi_term(A_mat, B_mat, q0)
     from NCC_channel_normal import channel_term_from_operator_pauli, build_sparse_tilde_F_terms
     from Pauli_Hamiltonian_BCH import pauli_decomposition_stream
@@ -332,7 +321,7 @@ def V_exact_action_on_rho(n: int, q0: int, s0: int, coupling_j: float, field_h: 
 
     out = rho.copy()
     for order in range(K + 1, s0 + 1):
-        out += (x**order) * apply_channel_term(tilde_F_channel_terms[order], rho)
+        out += apply_channel_term(tilde_F_channel_terms[order], rho)
     return out
 
 
@@ -367,14 +356,12 @@ def single_step_trotter_error(
 
 def estimate_rejection_diagnostics(
     n: int,
-    layers,
+    tilde_H_v,
     k_local: int,
-    g: float,
+    g_v: float,
     q0: int,
     s0: int,
     K: int,
-    x: float,
-    amax_kappa_plus_one: float,
     diagnostic_trials: int,
 ):
     """Estimate BCHSample acceptance rates and full-sampler nonzero rate."""
@@ -383,7 +370,7 @@ def estimate_rejection_diagnostics(
         rng = np.random.default_rng(1000 + q)
         accepted = 0
         for _ in range(diagnostic_trials):
-            unitary, eta = bch_sample(rng, layers, n, k_local, g, amax_kappa_plus_one, q)
+            unitary, eta = bch_sample(rng, tilde_H_v, n, k_local, g_v, q)
             if unitary is not None:
                 accepted += 1
         diagnostics[q] = accepted / diagnostic_trials
@@ -395,15 +382,13 @@ def estimate_rejection_diagnostics(
     for _ in range(diagnostic_trials):
         unitary, eta, _ = ncc_sample_rejection(
             rng,
-            layers,
+            tilde_H_v,
             n,
             k_local,
-            g,
+            g_v,
             q0,
             s0,
             K,
-            x,
-            amax_kappa_plus_one,
         )
         if eta == 0.0:
             continue
@@ -421,33 +406,6 @@ def estimate_rejection_diagnostics(
     }
 
 
-def build_outer_importance_distribution(
-    q0: int,
-    s0: int,
-    K: int,
-    n: int,
-    k_local: int,
-    g: float,
-    amax_kappa_plus_one: float,
-    x: float,
-    bch_acceptance_rates,
-    diagnostic_trials: int,
-):
-    """Proposal over (s, j, q_tuple) biased by estimated BCHSample success rates."""
-    entries = rejection_raw_entries(q0, s0, K, n, k_local, g, amax_kappa_plus_one, x)
-    fallback_rate = 1.0 / diagnostic_trials
-    scores = []
-    for _, j_parts, q_tuple, weight in entries:
-        estimated_success = 1.0
-        for q in q_tuple[:j_parts]:
-            estimated_success *= max(bch_acceptance_rates.get(q, 0.0), fallback_rate)
-        scores.append(weight * estimated_success)
-    total_score = float(sum(scores))
-    if total_score <= 0.0:
-        return np.array([weight for _, _, _, weight in entries], dtype=float) / sum(weight for _, _, _, weight in entries)
-    return np.array(scores, dtype=float) / total_score
-
-
 def main():
     args = parse_args()
     K = 1
@@ -457,74 +415,70 @@ def main():
     s0 = int(np.ceil(np.log(4 / args.epsilon))) if args.s0 <= 0 else args.s0
     s0 = max(3, s0)
     x = args.T / args.r
-    g = heisenberg_extensiveness_g(args.J, args.h)
+    g_0 = heisenberg_extensiveness_g(args.J, args.h)
+    amax_kappa_plus_one = 2.0
+    g_v = amax_kappa_plus_one * g_0 * x
 
-    layers = build_rejection_layers(args.N, args.J, args.h)
+    static = build_static(args.N, args.J, args.h)
+    tilde_H_v = build_tilde_H_v(static, x)
     rho0 = initial_density_matrix(args.N, args.initial_state)
     V_exact = V_exact_action_on_rho(args.N, q0, s0, args.J, args.h, K, x, rho0)
-    sample_error_before, expectation_bias, _ = single_step_trotter_error(args, q0, s0, K, rho0)
+    sample_error_before, expectation_bias, evolution_data = single_step_trotter_error(args, q0, s0, K, rho0)
+    rho_before = evolution_data["apply_uncompensated_single_step"](rho0)
+    rho_exact = evolution_data["apply_exact_single_step"](rho0)
     diagnostics = estimate_rejection_diagnostics(
         n=args.N,
-        layers=layers,
+        tilde_H_v=tilde_H_v,
         k_local=k_local,
-        g=g,
+        g_v=g_v,
         q0=q0,
         s0=s0,
         K=K,
-        x=x,
-        amax_kappa_plus_one=2.0,
         diagnostic_trials=args.diagnostic_trials,
     )
-    outer_probs = None
-    if not args.disable_outer_importance:
-        outer_probs = build_outer_importance_distribution(
-            q0=q0,
-            s0=s0,
-            K=K,
-            n=args.N,
-            k_local=k_local,
-            g=g,
-            amax_kappa_plus_one=2.0,
-            x=x,
-            bch_acceptance_rates=diagnostics["bch_acceptance_rates"],
-            diagnostic_trials=args.diagnostic_trials,
-        )
 
     rng = np.random.default_rng(args.seed)
     average = np.zeros_like(rho0)
-    normalization = None
+    average_after = np.zeros_like(rho0)
+    total_1_norm = None
+    zero_count = 0
     for _ in tqdm(range(args.trials), desc="rejection pseudocode trials"):
-        unitary, eta, normalization = ncc_sample_rejection(
+        unitary, eta, total_1_norm = ncc_sample_rejection(
             rng,
-            layers,
+            tilde_H_v,
             args.N,
             k_local,
-            g,
+            g_v,
             q0,
             s0,
             K,
-            x,
-            amax_kappa_plus_one=2.0,
-            outer_probs=outer_probs,
         )
-        average += normalization * eta * (unitary @ rho0 @ unitary.conj().T)
+        if eta == 0.0:
+            zero_count += 1
+        average += total_1_norm * eta * (unitary @ rho0 @ unitary.conj().T)
+        average_after += total_1_norm * eta * (unitary @ rho_before @ unitary.conj().T)
     average /= args.trials
+    average_after /= args.trials
     sample_fluctuation = trace_norm(average - V_exact)
+    sample_error_after = trace_norm(average_after - rho_exact)
+    zero_probability = zero_count / args.trials
 
     print("Prototype rejection pseudocode implementation:", True)
     print("N:", args.N, "q0:", q0, "s0:", s0, "r:", args.r, "x:", x)
     print("initial_state:", args.initial_state)
-    print("g:", g)
-    print("layers:", len(layers), "truncated rejection starts at s =", K + 1)
+    print("g_0:", g_0)
+    print("g_v:", g_v)
+    print("tilde_H_v:", len(tilde_H_v), "truncated rejection starts at s =", K + 1)
     print("sample_error_before:", sample_error_before)
+    print("sample_error_after:", sample_error_after)
     print("expectation_bias:", expectation_bias)
-    print("normalization:", normalization)
+    print("total_1_norm:", total_1_norm)
     print("sample_fluctuations:", sample_fluctuation)
+    print("zero_probability:", zero_probability)
     print("bch_acceptance_rates:", diagnostics["bch_acceptance_rates"])
     print("identity_rate:", diagnostics["identity_rate"])
     print("nonzero_rate:", diagnostics["nonzero_rate"])
     print("estimated_trials_for_10_nonzero_samples:", diagnostics["estimated_trials_for_ten_nonzero"])
-    print("outer_importance_enabled:", not args.disable_outer_importance)
 
 
 if __name__ == "__main__":
