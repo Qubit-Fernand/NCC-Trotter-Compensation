@@ -13,7 +13,7 @@ R_MAX="${R_MAX:-1024}"
 SAMPLING_SCRIPT="${SAMPLING_SCRIPT:-NCC_find_r_min.py}"
 
 NS=(4 5 6 7 8)
-TS=(0.2 0.4 0.8 1.0 2.0 4.0 8.0)
+TS=(0.2 0.4 0.6 0.8 1.0 2.0) # 4.0 8.0)
 EPSILONS=(0.001 0.0025 0.005 0.01 0.02 0.04 0.1)
 MODES=(original log)
 FIXED_N="${FIXED_N:-8}"

@@ -1,4 +1,8 @@
-"""follow pseudocode"""
+"""
+follow pseudocode
+different from operator version(NCC_log.py)
+the Phi notation as expectation contains x^q.
+"""
 
 import argparse
 import math

@@ -1,3 +1,5 @@
+"""Phi_q and each tilde_F term are separated from x^s as fixed matrics."""
+
 import argparse
 import math
 from functools import lru_cache
