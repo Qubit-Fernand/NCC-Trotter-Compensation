@@ -49,7 +49,7 @@ def parse_args():
 
 
 @lru_cache(maxsize=None)
-def build_static_data(n, q0, s0, epsilon=0.01, j=1.0, h=1.0, K=1):
+def build_static_data(n, q0, s0, j=1.0, h=1.0, K=1):
     """Precompute r-independent data for log-NCC evaluation."""
 
     A_mat, B_mat = build_periodic_ab(n, j, h)
@@ -215,7 +215,7 @@ def main():
     print("Lemma 3 condition 8e(a_max*kappa+1)q0kg t <= 1:", cond_bch_truncation)
     print("Lemma 5 condition e*lambda_comm*t <= 1:", cond_finite_s_truncation)
 
-    static = build_static_data(n=n, q0=q0, s0=s0, epsilon=epsilon, j=j, h=h, K=K)
+    static = build_static_data(n=n, q0=q0, s0=s0, j=j, h=h, K=K)
     evolution_data = build_tilde_V(static, t_total, r)
     A_mat = static["A_mat"]
     B_mat = static["B_mat"]

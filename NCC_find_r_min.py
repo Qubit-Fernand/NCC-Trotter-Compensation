@@ -328,7 +328,7 @@ def build_mode_config(args):
         s0 = max(3, s0)
         q0 = int(np.ceil(np.log(2 * args.N / args.epsilon))) if args.q0 <= 0 else args.q0
         q0 = max(3, q0)
-        static = ncc_log.build_static_data(n=args.N, q0=q0, s0=s0, epsilon=args.epsilon, j=args.J, h=args.h, K=1)
+        static = ncc_log.build_static_data(n=args.N, q0=q0, s0=s0, j=args.J, h=args.h, K=1)
         return {
             "static": static,
             "q0": q0,
