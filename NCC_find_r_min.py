@@ -1,7 +1,6 @@
 import argparse
 import json
 import math
-from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
@@ -13,28 +12,13 @@ from Pauli_Hamiltonian_BCH import cached_pauli_matrix_from_label
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description="Unified sampling-based r_min search for original/log NCC.")
-    parser.add_argument("--mode", choices=("original", "log"), default="log", help="which NCC variant to run")
-    parser.add_argument("--out-dir", type=Path, default=Path("data"), help="output directory")
-    parser.add_argument("--tag", type=str, default="", help="optional suffix for output file names")
+    parser = argparse.ArgumentParser(description="Run unified sampling-based r_min searches from a JSON batch file.")
     parser.add_argument(
         "--batch-file",
         type=Path,
-        default=None,
-        help="optional JSON file listing multiple case overrides to run sequentially in one Python process",
+        default=Path("run.json"),
+        help="JSON file listing defaults and cases to run sequentially in one Python process",
     )
-    parser.add_argument("--N", type=int, default=6, help="number of spins")
-    parser.add_argument("--J", type=float, default=1.0, help="interaction strength")
-    parser.add_argument("--h", type=float, default=1.0, help="field strength")
-    parser.add_argument("--T", type=float, default=1.0, help="total evolution time")
-    parser.add_argument("--epsilon", type=float, default=0.01, help="target precision")
-    parser.add_argument("--trials", type=int, default=1000, help="Monte Carlo trajectories per r")
-    parser.add_argument("--repeats", type=int, default=10, help="number of repeated r_min searches")
-    parser.add_argument("--seed", type=int, default=7, help="base RNG seed")
-    parser.add_argument("--r-max", type=int, default=512, help="maximal r allowed during search")
-    parser.add_argument("--s0", type=int, default=0, help="override log truncation order")
-    parser.add_argument("--q0", type=int, default=0, help="override BCH truncation order")
-    parser.add_argument("--save-every-search", action="store_true", help="checkpoint after every sampled r search step")
     return parser
 
 
@@ -59,6 +43,22 @@ CASE_FIELDS = {
     "q0",
     "save_every_search",
 }
+
+CASE_DEFAULTS = {
+    "out_dir": Path("data"),
+    "tag": "",
+    "J": 1.0,
+    "h": 1.0,
+    "trials": 1000,
+    "repeats": 10,
+    "seed": 7,
+    "r_max": 1024,
+    "s0": 0,
+    "q0": 0,
+    "save_every_search": False,
+}
+
+REQUIRED_CASE_FIELDS = {"mode", "N", "T", "epsilon"}
 
 
 def make_search_seed(base_seed: int, repetition: int, r: int) -> int:
@@ -123,20 +123,20 @@ def load_batch_cases(batch_file: Path) -> list[dict]:
         if unknown_keys:
             raise ValueError(f"batch case #{idx} in {batch_file} has unsupported keys: {', '.join(unknown_keys)}")
 
-        normalized = dict(defaults)
+        normalized = dict(CASE_DEFAULTS)
+        normalized.update(defaults)
         normalized.update(case)
-        if "out_dir" in normalized:
-            normalized["out_dir"] = Path(normalized["out_dir"])
+        missing_keys = sorted(field for field in REQUIRED_CASE_FIELDS if field not in normalized)
+        if missing_keys:
+            raise ValueError(f"batch case #{idx} in {batch_file} is missing required keys: {', '.join(missing_keys)}")
+
+        normalized["out_dir"] = Path(normalized["out_dir"])
         normalized_cases.append(normalized)
     return normalized_cases
 
 
-# copy the (default) args, override with the case-specific values, and return a new Namespace for the case
-def case_args_from_overrides(base_args, overrides: dict):
-    case_args = argparse.Namespace(**vars(deepcopy(base_args)))
-    for key, value in overrides.items():
-        setattr(case_args, key, value)
-    return case_args
+def case_namespace(case: dict):
+    return argparse.Namespace(**case)
 
 
 def grouped_search_array(payload: dict, key: str, fill_value, dtype):
@@ -511,16 +511,10 @@ def run_case(args, case_index: int | None = None, total_cases: int | None = None
 
 def main(argv=None):
     args = parse_args(argv)
-    if args.batch_file is None:
-        run_case(args)
-        return
-
     cases = load_batch_cases(args.batch_file)
     print(f"loaded {len(cases)} cases from {args.batch_file}")
-    for idx, overrides in enumerate(cases, start=1):
-        case_args = case_args_from_overrides(args, overrides)
-        case_args.batch_file = None
-        run_case(case_args, case_index=idx, total_cases=len(cases))
+    for idx, case in enumerate(cases, start=1):
+        run_case(case_namespace(case), case_index=idx, total_cases=len(cases))
 
 
 if __name__ == "__main__":

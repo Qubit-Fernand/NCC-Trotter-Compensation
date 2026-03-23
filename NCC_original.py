@@ -71,10 +71,12 @@ def build_tilde_V(static, t_total: float, r: int, validation_tol=1e-10):
     U_exact = expm(-1j * static["h_total"] * t_total)
 
     tilde_V = np.zeros_like(static["identity"])
+    # actual coeffs and l1_norm need to multiply the factor x^s/s!
     for weight, coeffs, labels, l1_norm in (
         (p_s[0], static["c1_coeffs"], static["c1_labels"], static["c1_l1"]),
         (p_s[1], static["c2_coeffs"], static["c2_labels"], static["c2_l1"]),
     ):
+        # actually prob = coeffs * x^s/s! / (l1_norm * x^s/s!)
         probs = np.abs(coeffs) / l1_norm
         for prob, coeff, label in zip(probs, coeffs, labels):
             sign = coeff / (1j * abs(coeff))

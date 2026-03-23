@@ -7,31 +7,58 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from NCC_channel_normal import build_static_data, build_tilde_V, sample_compensated_single_step, zero_density_matrix
+from NCC_channel_normal import apply_unitary_channel, build_static_data, build_tilde_V, sample_channel_then_compensate, zero_density_matrix
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description="Sampling-based r_min search for channel-NCC.")
-    parser.add_argument("--out-dir", type=Path, default=Path("data"), help="output directory")
-    parser.add_argument("--tag", type=str, default="", help="optional suffix for output file names")
-    parser.add_argument("--N", type=int, default=3, help="number of spins")
-    parser.add_argument("--J", type=float, default=1.0, help="interaction strength")
-    parser.add_argument("--h", type=float, default=1.0, help="field strength")
-    parser.add_argument("--T", type=float, default=1.0, help="total evolution time")
-    parser.add_argument("--epsilon", type=float, default=0.01, help="target precision")
-    parser.add_argument("--trials", type=int, default=1000, help="Monte Carlo trajectories per r")
-    parser.add_argument("--repeats", type=int, default=10, help="number of repeated r_min searches")
-    parser.add_argument("--seed", type=int, default=7, help="base RNG seed")
-    parser.add_argument("--r-max", type=int, default=512, help="maximal r allowed during search")
-    parser.add_argument("--s0", type=int, default=0, help="override compensation truncation order")
-    parser.add_argument("--q0", type=int, default=0, help="override BCH truncation order")
-    parser.add_argument("--max_dense_qubits", type=int, default=3, help="small-system guard for validation")
-    parser.add_argument("--save-every-search", action="store_true", help="checkpoint after every sampled r search step")
+    parser = argparse.ArgumentParser(description="Run channel sampling-based r_min searches from a JSON batch file.")
+    parser.add_argument(
+        "--batch-file",
+        type=Path,
+        default=Path("run_channel.json"),
+        help="JSON file listing defaults and cases to run sequentially in one Python process",
+    )
     return parser
 
 
 def parse_args(argv=None):
     return build_parser().parse_args(argv)
+
+
+CASE_FIELDS = {
+    "out_dir",
+    "tag",
+    "N",
+    "J",
+    "h",
+    "T",
+    "epsilon",
+    "trials",
+    "repeats",
+    "seed",
+    "r_max",
+    "s0",
+    "q0",
+    "max_dense_qubits",
+    "save_every_search",
+}
+
+CASE_DEFAULTS = {
+    "out_dir": Path("data"),
+    "tag": "",
+    "J": 1.0,
+    "h": 1.0,
+    "trials": 1000,
+    "repeats": 10,
+    "seed": 7,
+    "r_max": 512,
+    "s0": 0,
+    "q0": 0,
+    "max_dense_qubits": 3,
+    "save_every_search": False,
+}
+
+REQUIRED_CASE_FIELDS = {"N", "T", "epsilon"}
 
 
 def make_search_seed(base_seed: int, repetition: int, r: int) -> int:
@@ -67,48 +94,49 @@ def sampling_output_path(args, q0: int, s0: int) -> Path:
     return output_dir / (f"NCC_channel_sampling_r_N{args.N}_T{args.T:g}_eps{args.epsilon:g}_" f"trials{args.trials}_repeats{args.repeats}_q{q0}_s{s0}{suffix}")
 
 
-def grouped_search_array(payload: dict, key: str, fill_value, dtype):
-    grouped: dict[int, list] = {}
-    for item in payload["searches"]:
-        grouped.setdefault(int(item["repetition"]), []).append(item[key])
-    if not grouped:
-        return np.empty((0, 0), dtype=dtype), np.empty((0,), dtype=int)
-    reps = sorted(grouped)
-    lengths = np.array([len(grouped[rep]) for rep in reps], dtype=int)
-    width = int(lengths.max())
-    array = np.full((len(reps), width), fill_value, dtype=dtype)
-    for row, rep in enumerate(reps):
-        values = np.array(grouped[rep], dtype=dtype)
-        array[row, : len(values)] = values
-    return array, lengths
+def load_batch_cases(batch_file: Path) -> list[dict]:
+    payload = json.loads(batch_file.read_text())
+    defaults = {}
+    if isinstance(payload, dict):
+        defaults = payload.get("defaults", {})
+        cases = payload.get("cases")
+    else:
+        cases = payload
+    if not isinstance(cases, list) or not cases:
+        raise ValueError(f"batch file {batch_file} must contain a non-empty case list")
+    if not isinstance(defaults, dict):
+        raise ValueError(f"batch file {batch_file} has non-object defaults")
 
+    default_unknown_keys = sorted(set(defaults) - CASE_FIELDS)
+    if default_unknown_keys:
+        raise ValueError(f"batch file {batch_file} has unsupported default keys: {', '.join(default_unknown_keys)}")
+
+    normalized_cases = []
+    for idx, case in enumerate(cases, start=1):
+        if not isinstance(case, dict):
+            raise ValueError(f"batch case #{idx} in {batch_file} must be an object")
+        unknown_keys = sorted(set(case) - CASE_FIELDS)
+        if unknown_keys:
+            raise ValueError(f"batch case #{idx} in {batch_file} has unsupported keys: {', '.join(unknown_keys)}")
+
+        normalized = dict(CASE_DEFAULTS)
+        normalized.update(defaults)
+        normalized.update(case)
+        missing_keys = sorted(field for field in REQUIRED_CASE_FIELDS if field not in normalized)
+        if missing_keys:
+            raise ValueError(f"batch case #{idx} in {batch_file} is missing required keys: {', '.join(missing_keys)}")
+
+        normalized["out_dir"] = Path(normalized["out_dir"])
+        normalized_cases.append(normalized)
+    return normalized_cases
+
+
+def case_namespace(case: dict):
+    return argparse.Namespace(**case)
 
 def save_sampling_checkpoint(output_path: Path, payload: dict):
     json_path = Path(f"{output_path}.json")
-    npz_path = Path(f"{output_path}.npz")
     json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
-    searched_r, searched_lengths = grouped_search_array(payload, "r", -1, int)
-    searched_seed, _ = grouped_search_array(payload, "seed", -1, int)
-    searched_sample_error, _ = grouped_search_array(payload, "sample_error", np.nan, float)
-    searched_expectation_bias, _ = grouped_search_array(payload, "expectation_bias", np.nan, float)
-    searched_sample_fluctuation, _ = grouped_search_array(payload, "sample_fluctuation", np.nan, float)
-    np.savez(
-        npz_path,
-        sampled_r_mins=np.array(payload["sampled_r_mins"], dtype=int),
-        expected_r_mins=np.array(payload["expected_r_mins"], dtype=int),
-        sample_errors=np.array(payload["sample_errors"], dtype=float),
-        expectation_biases=np.array(payload["expectation_biases"], dtype=float),
-        sample_fluctuations=np.array(payload["sample_fluctuations"], dtype=float),
-        low_bounds=np.array(payload["ci_low_history"], dtype=float),
-        high_bounds=np.array(payload["ci_high_history"], dtype=float),
-        searched_repetition=np.array([item["repetition"] for item in payload["searches"]], dtype=int),
-        searched_lengths=searched_lengths,
-        searched_r=searched_r,
-        searched_seed=searched_seed,
-        searched_sample_error=searched_sample_error,
-        searched_expectation_bias=searched_expectation_bias,
-        searched_sample_fluctuation=searched_sample_fluctuation,
-    )
 
 
 def trace_norm(matrix: np.ndarray) -> float:
@@ -135,7 +163,9 @@ def estimate_total_sample_error(
     for _ in tqdm(range(trials), desc=f"r={r}", leave=False, disable=not sys.stderr.isatty()):
         rho = rho0.copy()
         for _ in range(r):
-            rho = sample_compensated_single_step(rng, static, evolution_data, rho)
+            rho_after_trotter = apply_unitary_channel(evolution_data["S1"], rho)
+            order = int(rng.choice(static["s_orders"], p=evolution_data["p_order"]))
+            rho = sample_channel_then_compensate(rng, static, evolution_data, order, rho_after_trotter)
         rho_average += rho
     rho_average /= trials
 
@@ -232,9 +262,10 @@ def search_r_min(
     return sampled_r_min, sampled_eval, expected_r_min
 
 
-def main(argv=None):
-    args = parse_args(argv)
-    args.out_dir.mkdir(parents=True, exist_ok=True)
+def run_case(args, case_index=None, total_cases=None):
+    case_prefix = ""
+    if case_index is not None and total_cases is not None:
+        case_prefix = f"[case {case_index}/{total_cases}] "
     s0 = int(np.ceil(np.log(4 / args.epsilon))) if args.s0 <= 0 else args.s0
     s0 = max(3, s0)
     q0 = int(np.ceil(np.log(2 * args.N / args.epsilon))) if args.q0 <= 0 else args.q0
@@ -244,7 +275,6 @@ def main(argv=None):
         n=args.N,
         q0=q0,
         s0=s0,
-        epsilon=args.epsilon,
         j=args.J,
         h=args.h,
         K=1,
@@ -281,7 +311,7 @@ def main(argv=None):
         save_sampling_checkpoint(output_path, payload)
 
     for repetition in range(args.repeats):
-        label = f"[repeat {repetition + 1}/{args.repeats}]"
+        label = f"{case_prefix}[repeat {repetition + 1}/{args.repeats}]"
         sampled_r_min, metrics, expected_r_min = search_r_min(
             static=static,
             evolution_cache=evolution_cache,
@@ -311,13 +341,21 @@ def main(argv=None):
 
     sampled_r_mins = np.array(payload["sampled_r_mins"], dtype=float)
     mean, ci_low, ci_high = confidence_interval(sampled_r_mins)
-    print("finished search")
+    print(f"{case_prefix}finished search")
     print(f"sampled r_min samples: {payload['sampled_r_mins']}")
     print(f"expected r_min samples: {payload['expected_r_mins']}")
     print(f"sampled r_min mean: {mean:.3f}")
     print(f"95% CI for sampled r_min mean: [{ci_low:.3f}, {ci_high:.3f}]")
     print(f"saved checkpoint to: {Path(f'{output_path}.json')}")
-    print(f"saved arrays to: {Path(f'{output_path}.npz')}")
+    return output_path
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    cases = load_batch_cases(args.batch_file)
+    print(f"loaded {len(cases)} cases from {args.batch_file}")
+    for idx, case in enumerate(cases, start=1):
+        run_case(case_namespace(case), case_index=idx, total_cases=len(cases))
 
 
 if __name__ == "__main__":

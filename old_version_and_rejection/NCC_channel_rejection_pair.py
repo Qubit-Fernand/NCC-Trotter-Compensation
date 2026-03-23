@@ -16,7 +16,7 @@ from NCC_channel_normal import (
 )
 from Pauli_Hamiltonian_BCH import build_periodic_ab, cached_pauli_matrix_from_label, phi_term, tilde_F_term, commutator
 
-from NCC_channel_rejection import (
+from old_version_and_rejection.NCC_channel_rejection import (
     build_static_data as build_rejection_static_data,
     build_tilde_V as build_rejection_tilde_V,
     sample_term,

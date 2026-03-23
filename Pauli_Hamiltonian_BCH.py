@@ -85,7 +85,10 @@ def phi_term(A_mat, B_mat, q_max):
 
 
 def tilde_F_term(Phi_terms, k_order, q0, s0):
-    """Return matrices C_s with \\tilde F_{K,s}(x) = C_s x^s."""
+    """
+    Return matrices C_s with \\tilde F_{K,s}(x) = C_s! x^s.
+    When C_s contains multiple phi_q terms, the factorial is applied to the number of terms j in the product, not the order s. in
+    """
 
     def iter_compositions(total, parts, lower, upper):
         if parts == 1:
@@ -111,7 +114,7 @@ def tilde_F_term(Phi_terms, k_order, q0, s0):
                 product = np.eye(dim, dtype=complex)
                 for q in q_tuple:
                     product = product @ Phi_terms[q]
-                total += product / math.factorial(j)
+                total += product / math.factorial(j)  # factorial here!
         tilde_F_terms[s] = total
     return tilde_F_terms
 

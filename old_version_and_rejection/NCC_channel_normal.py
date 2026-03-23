@@ -129,6 +129,169 @@ def multiply_pauli_labels(label_a: tuple[int, ...], label_b: tuple[int, ...]) ->
     return phase, tuple(product)
 
 
+def compress_channel_term(term: dict[tuple[tuple[int, ...], tuple[int, ...]], complex], tol=1e-12):
+    """Drop numerically tiny coefficients from a sparse channel term."""
+    return {key: value for key, value in term.items() if abs(value) > tol}
+
+
+def add_channel_terms(
+    accumulator: dict[tuple[tuple[int, ...], tuple[int, ...]], complex],
+    term: dict[tuple[tuple[int, ...], tuple[int, ...]], complex],
+    scale: complex = 1.0 + 0.0j,
+):
+    """Add a scaled sparse channel term into the accumulator."""
+    for key, value in term.items():
+        accumulator[key] = accumulator.get(key, 0.0 + 0.0j) + scale * value
+    return accumulator
+
+
+def ad_channel_from_operator_pauli(coeffs, labels, num_qubits: int):
+    """Build ad_O from the Pauli expansion O = sum coeff * P."""
+    identity = identity_label(num_qubits)
+    term: dict[tuple[tuple[int, ...], tuple[int, ...]], complex] = {}
+    for coeff, label in zip(coeffs, labels):
+        term[(label, identity)] = term.get((label, identity), 0.0 + 0.0j) + coeff
+        term[(identity, label)] = term.get((identity, label), 0.0 + 0.0j) - coeff
+    return compress_channel_term(term)
+
+
+def compose_channel_terms(
+    left_term: dict[tuple[tuple[int, ...], tuple[int, ...]], complex],
+    right_term: dict[tuple[tuple[int, ...], tuple[int, ...]], complex],
+    tol=1e-12,
+):
+    """Return left_term o right_term, i.e. apply right_term then left_term."""
+    composed: dict[tuple[tuple[int, ...], tuple[int, ...]], complex] = {}
+    for (left_l, left_r), left_coeff in left_term.items():
+        for (right_l, right_r), right_coeff in right_term.items():
+            left_phase, product_left = multiply_pauli_labels(left_l, right_l)
+            right_phase, product_right = multiply_pauli_labels(right_r, left_r)
+            coeff = left_coeff * right_coeff * left_phase * right_phase
+            key = (product_left, product_right)
+            composed[key] = composed.get(key, 0.0 + 0.0j) + coeff
+    return compress_channel_term(composed, tol=tol)
+
+
+def apply_channel_term(
+    term: dict[tuple[tuple[int, ...], tuple[int, ...]], complex],
+    rho: np.ndarray,
+) -> np.ndarray:
+    """Apply a sparse left/right Pauli channel term to rho."""
+    out = np.zeros_like(rho)
+    for (left_label, right_label), coeff in term.items():
+        left = cached_pauli_matrix_from_label(left_label)
+        right = cached_pauli_matrix_from_label(right_label)
+        out += coeff * (left @ rho @ right)
+    return out
+
+
+def channel_term_to_arrays(term):
+    """Convert a sparse channel term to deterministic arrays for sampling."""
+    items = sorted(term.items())
+    coeffs = np.array([coeff for _, coeff in items], dtype=complex)
+    left_labels = [labels[0] for labels, _ in items]
+    right_labels = [labels[1] for labels, _ in items]
+    l1_norm = float(np.sum(np.abs(coeffs)))
+    if l1_norm <= 0:
+        raise ValueError("empty channel decomposition")
+    return coeffs, left_labels, right_labels, l1_norm
+
+
+def channel_term_max_abs_diff(term_a, term_b) -> float:
+    """Compare two sparse channel terms by the largest coefficient mismatch."""
+    all_keys = set(term_a) | set(term_b)
+    if not all_keys:
+        return 0.0
+    return float(max(abs(term_a.get(key, 0.0 + 0.0j) - term_b.get(key, 0.0 + 0.0j)) for key in all_keys))
+
+
+def decompose_tail_channel_term(term, num_qubits: int, tol=1e-12):
+    """Split a sparse tail channel term into executable pieces when possible."""
+    identity = identity_label(num_qubits)
+    remaining = dict(term)
+    components = []
+
+    identity_coeff = remaining.pop((identity, identity), 0.0 + 0.0j)
+    if abs(identity_coeff) > tol:
+        components.append({"kind": "identity", "coeff": identity_coeff})
+
+    # Direct Pauli conjugation channels rho -> P rho P are already executable.
+    conjugation_keys = [key for key in list(remaining) if key[0] == key[1] and key[0] != identity]
+    for key in conjugation_keys:
+        coeff = remaining.pop(key)
+        if abs(coeff) <= tol:
+            continue
+        components.append(
+            {
+                "kind": "unitary",
+                "coeff": coeff,
+                "unitary": cached_pauli_matrix_from_label(key[0]),
+            }
+        )
+
+    # If a tail term still contains an ad_{iP}-type pair, replace it with
+    # e^{+i pi/4 ad_P} - e^{-i pi/4 ad_P}, which is directly executable.
+    for label in [lbl for lbl in set(left for left, _ in remaining) | set(right for _, right in remaining) if lbl != identity]:
+        left_key = (label, identity)
+        right_key = (identity, label)
+        if left_key not in remaining or right_key not in remaining:
+            continue
+        left_coeff = remaining[left_key]
+        right_coeff = remaining[right_key]
+        if abs(left_coeff + right_coeff) > tol:
+            continue
+        if abs(np.real(left_coeff)) > tol or abs(np.real(right_coeff)) > tol:
+            continue
+
+        magnitude = abs(left_coeff)
+        if magnitude <= tol:
+            remaining.pop(left_key, None)
+            remaining.pop(right_key, None)
+            continue
+
+        phase = left_coeff / (1j * magnitude)
+        W_mat = phase * cached_pauli_matrix_from_label(label)
+        hermitian_err = float(np.linalg.norm(W_mat - W_mat.conj().T, ord="fro"))
+        if hermitian_err > 1e-10:
+            continue
+
+        plus_unitary = (np.eye(2**num_qubits, dtype=complex) + 1j * W_mat) / math.sqrt(2.0)
+        minus_unitary = (np.eye(2**num_qubits, dtype=complex) - 1j * W_mat) / math.sqrt(2.0)
+        components.append({"kind": "unitary", "coeff": magnitude, "unitary": plus_unitary})
+        components.append({"kind": "unitary", "coeff": -magnitude, "unitary": minus_unitary})
+        remaining.pop(left_key, None)
+        remaining.pop(right_key, None)
+
+    # Residual cross terms are kept as general left/right actions.
+    for (left_label, right_label), coeff in sorted(remaining.items()):
+        if abs(coeff) <= tol:
+            continue
+        components.append(
+            {
+                "kind": "general",
+                "coeff": coeff,
+                "left_mat": cached_pauli_matrix_from_label(left_label),
+                "right_mat": cached_pauli_matrix_from_label(right_label),
+            }
+        )
+
+    l1_norm = float(sum(abs(component["coeff"]) for component in components))
+    if l1_norm <= 0:
+        raise ValueError("empty executable tail decomposition")
+    return components, l1_norm
+
+
+def apply_tail_component(component: dict, rho: np.ndarray) -> np.ndarray:
+    """Apply one tail component action to rho."""
+    if component["kind"] == "identity":
+        return rho
+    if component["kind"] == "unitary":
+        return apply_unitary_channel(component["unitary"], rho)
+    if component["kind"] == "general":
+        return component["left_mat"] @ rho @ component["right_mat"]
+    raise ValueError(f"unsupported tail component kind={component['kind']}")
+
+
 def iter_matrix_units(dim: int):
     """Yield the matrix-unit basis E_ij."""
     for row in range(dim):
@@ -152,99 +315,37 @@ def trace_norm(matrix: np.ndarray) -> float:
     return float(np.sum(np.linalg.svd(matrix, compute_uv=False)))
 
 
-def iter_compositions(total: int, parts: int, lower: int, upper: int):
-    """Yield ordered compositions with bounded part sizes."""
-    if parts == 1:
-        if lower <= total <= upper:
-            yield (total,)
-        return
-    min_rest = (parts - 1) * lower
-    max_rest = (parts - 1) * upper
-    start = max(lower, total - max_rest)
-    stop = min(upper, total - min_rest)
-    for first in range(start, stop + 1):
-        for rest in iter_compositions(total - first, parts - 1, lower, upper):
-            yield (first,) + rest
+def build_sparse_tilde_F_terms(Phi_channel_terms, num_qubits: int, k_order: int, q0: int, s0: int):
+    """Return sparse channel terms C_s with \tilde F_{K,s}(x) = C_s x^s."""
 
+    def iter_compositions(total, parts, lower, upper):
+        if parts == 1:
+            if lower <= total <= upper:
+                yield (total,)
+            return
+        min_rest = (parts - 1) * lower
+        max_rest = (parts - 1) * upper
+        start = max(lower, total - max_rest)
+        stop = min(upper, total - min_rest)
+        for first in range(start, stop + 1):
+            for rest in iter_compositions(total - first, parts - 1, lower, upper):
+                yield (first,) + rest
 
-# channel_F_tail = ad_phi * ad_phi ...., decompose each ad_phi into ad_Pauli
-# when sampling, each ad_Pauli is sampled as either +e^{+i pi/4 ad_P} or -e^{-i pi/4 ad_P}
-def build_phi_layer_in_tail_F(Phi_terms: dict[int, np.ndarray], n: int, k_order: int, q0: int):
-    """Store only operator Phi_q and its anti-Hermitian Pauli decomposition."""
-    identity = np.eye(2**n, dtype=complex)
-    phi_layer_in_tail_F = {}
-    for order in range(k_order + 1, q0 + 1):
-        antiherm_err = float(np.linalg.norm(Phi_terms[order] + Phi_terms[order].conj().T, ord="fro"))
-        if antiherm_err > 1e-8:
-            raise ValueError(f"Phi_{order} is not anti-Hermitian enough for channel sampling (antiherm_err={antiherm_err:.3e})")
-        coeffs, labels, l1_norm = pauli_decomposition_stream(Phi_terms[order], antihermitian=True)
-        probs = np.abs(coeffs) / l1_norm
-        components = []
-        for prob, coeff, label in zip(probs, coeffs, labels):
-            pauli_sign = coeff / (1j * abs(coeff))
-            if abs(np.imag(pauli_sign)) > 1e-10 or not np.isclose(abs(np.real(pauli_sign)), 1.0, atol=1e-10):
-                raise ValueError(f"Phi_{order} Pauli coefficient has unexpected phase {pauli_sign}")
-            pauli_sign = float(np.real(pauli_sign))
-            pauli_mat = cached_pauli_matrix_from_label(label)
-            components.append(
-                {
-                    "prob": float(prob),
-                    "pauli_sign": pauli_sign,
-                    "pauli_mat": pauli_mat,
-                    # Phi_q is anti-Hermitian, so each sampled term is i * (± P).
-                    # We keep the base Hermitian Pauli P and absorb the sign into
-                    # which exp(± i pi/4 P) branch is called "plus" or "minus".
-                    "plus_unitary": (identity + 1j * pauli_sign * pauli_mat) / math.sqrt(2.0),
-                    "minus_unitary": (identity - 1j * pauli_sign * pauli_mat) / math.sqrt(2.0),
-                }
-            )
-        phi_layer_in_tail_F[order] = {
-            "coeffs": coeffs,
-            "labels": labels,
-            "l1_norm": l1_norm,
-            "antiherm_err": antiherm_err,
-            "layer_sampling_l1_norm": 2.0 * l1_norm,
-            "components": components,
-            "component_probs": np.array([component["prob"] for component in components], dtype=float),
-        }
-    return phi_layer_in_tail_F
-
-
-def build_tail_sampling_recipes(phi_layer_in_tail_F: dict[int, dict], k_order: int, q0: int, s0: int):
-    """
-    Build tail recipes without explicitly materializing F_channel.
-
-    For tail orders we only store how F_{K,s} is assembled as products of
-    ad_{Phi_q}. When sampling, each ad_{Phi_q} is expanded into Pauli terms and
-    each ad_{iP} is sampled as either +e^{+i pi/4 ad_P} or -e^{-i pi/4 ad_P}.
-    """
-    tail_recipe_terms = {}
+    id_label = identity_label(num_qubits)
+    identity_term = {(id_label, id_label): 1.0 + 0.0j}
+    tilde_F_terms = {}
     q_min = k_order + 1
-    for order in range(2 * k_order + 2, s0 + 1):
-        recipes = []
-        max_parts = order // q_min
-        for num_parts in range(1, max_parts + 1):
-            recipe_scale = 1.0 / math.factorial(num_parts)
-            for q_tuple in iter_compositions(order, num_parts, q_min, q0):
-                layer_sampling_l1_product = float(np.prod([phi_layer_in_tail_F[q]["layer_sampling_l1_norm"] for q in q_tuple], dtype=float))
-                recipes.append(
-                    {
-                        "q_tuple": q_tuple,
-                        "recipe_scale": recipe_scale,
-                        "layer_sampling_l1_product": layer_sampling_l1_product,
-                        "sampling_weight": recipe_scale * layer_sampling_l1_product,
-                    }
-                )
-        if not recipes:
-            raise ValueError(f"tail order s={order} has no valid Phi-composition recipes")
-        sampling_l1_norm = float(sum(recipe["sampling_weight"] for recipe in recipes))
-        recipe_probs = np.array([recipe["sampling_weight"] / sampling_l1_norm for recipe in recipes], dtype=float)
-        tail_recipe_terms[order] = {
-            "recipes": recipes,
-            "sampling_l1_norm": sampling_l1_norm,
-            "recipe_probs": recipe_probs,
-        }
-    return tail_recipe_terms
+    for s in range(q_min, s0 + 1):
+        total_term: dict[tuple[tuple[int, ...], tuple[int, ...]], complex] = {}
+        max_parts = s // q_min
+        for j in range(1, max_parts + 1):
+            for q_tuple in iter_compositions(s, j, q_min, q0):
+                product_term = identity_term
+                for q in q_tuple:
+                    product_term = compose_channel_terms(product_term, Phi_channel_terms[q])
+                add_channel_terms(total_term, product_term, scale=1.0 / math.factorial(j))
+        tilde_F_terms[s] = compress_channel_term(total_term)
+    return tilde_F_terms
 
 
 def paired_channel_parameters(eta_pair_sum: float) -> dict:
@@ -277,7 +378,7 @@ def paired_channel_parameters(eta_pair_sum: float) -> dict:
 
 @lru_cache(maxsize=None)
 def build_static_data(n, q0, s0, j=1.0, h=1.0, K=1, max_dense_qubits=3):
-    """Precompute r-independent operator data and sampling recipes."""
+    """Precompute r-independent operator data and sparse channel expansions."""
     if n > max_dense_qubits:
         raise ValueError(
             f"action-on-rho channel prototype only supports N <= {max_dense_qubits}; " f"received N={n}. For larger N, a locality-based sampler is still needed."
@@ -289,8 +390,15 @@ def build_static_data(n, q0, s0, j=1.0, h=1.0, K=1, max_dense_qubits=3):
 
     Phi_terms = phi_term(A_mat, B_mat, q0)
     tilde_F_operator_terms = tilde_F_term(Phi_terms, K, q0, s0)
-    phi_layer_in_tail_F = build_phi_layer_in_tail_F(Phi_terms, n, K, q0)
-    tail_recipe_terms = build_tail_sampling_recipes(phi_layer_in_tail_F, K, q0, s0)
+
+    Phi_channel_terms = {}
+    # each Phi_channel = sum_permutation [ad_X1, ad_X2, ...] = sum ad_[X_1, X_2, ...]
+    # = sum [X_1, X_2, ...]\dot - \dot sum [X_1, X_2, ...] = Phi_operator \dot - \dot Phi_operator
+    for order in range(K + 1, q0 + 1):
+        coeffs, labels, _ = pauli_decomposition_stream(Phi_terms[order])
+        Phi_channel_terms[order] = ad_channel_from_operator_pauli(coeffs, labels, n)
+
+    tilde_F_channel_terms = build_sparse_tilde_F_terms(Phi_channel_terms, n, K, q0, s0)
 
     F_terms = {}
     pairable_orders = []
@@ -299,14 +407,21 @@ def build_static_data(n, q0, s0, j=1.0, h=1.0, K=1, max_dense_qubits=3):
 
     for order in range(K + 1, s0 + 1):
         if order <= 2 * K + 1:
+            # verify that the leading-order term in operator F is anti-Hermitian.
             tilde_operator_F = tilde_F_operator_terms[order]
             antiherm_err = float(np.linalg.norm(tilde_operator_F + tilde_operator_F.conj().T, ord="fro"))
             if antiherm_err > 1e-8:
                 raise ValueError(f"leading order s={order} is not anti-Hermitian enough for channel pairing " f"(antiherm_err={antiherm_err:.3e})")
 
+            # leading-order F only contains single Phi, = ad_{Phi operator} = ad_{F operator}
             coeffs, labels, l1_norm = pauli_decomposition_stream(tilde_operator_F, antihermitian=True)
-            pair_validation_errors[order] = float(np.linalg.norm(tilde_operator_F - Phi_terms[order], ord="fro"))
+            ad_operator_F = ad_channel_from_operator_pauli(coeffs, labels, n)
+            pair_validation_errors[order] = channel_term_max_abs_diff(
+                tilde_F_channel_terms[order],
+                ad_operator_F,
+            )
             pairable_orders.append(order)
+            # actually you are storing the operator F for ad_F
             F_terms[order] = {
                 "kind": "pair",
                 "coeffs": coeffs,
@@ -315,10 +430,12 @@ def build_static_data(n, q0, s0, j=1.0, h=1.0, K=1, max_dense_qubits=3):
                 "antiherm_err": antiherm_err,
             }
         else:
+            components, l1_norm = decompose_tail_channel_term(tilde_F_channel_terms[order], n)
             tail_orders.append(order)
             F_terms[order] = {
                 "kind": "tail",
-                **tail_recipe_terms[order],
+                "components": components,
+                "l1_norm": l1_norm,
             }
 
     return {
@@ -328,8 +445,9 @@ def build_static_data(n, q0, s0, j=1.0, h=1.0, K=1, max_dense_qubits=3):
         "identity": identity,
         "dim": dim,
         "Phi_terms": Phi_terms,
-        "phi_layer_in_tail_F": phi_layer_in_tail_F,
+        "Phi_channel_terms": Phi_channel_terms,
         "tilde_F_operator_terms": tilde_F_operator_terms,
+        "tilde_F_channel_terms": tilde_F_channel_terms,
         "F_terms": F_terms,
         "s_orders": list(range(K + 1, s0 + 1)),
         "pairable_orders": pairable_orders,
@@ -353,7 +471,7 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
     s_orders = static["s_orders"]
     pairable_orders = static["pairable_orders"]
     tail_orders = static["tail_orders"]
-    phi_layer_in_tail_F = static["phi_layer_in_tail_F"]
+    tilde_F_channel_terms = static["tilde_F_channel_terms"]
 
     t = t_total / r
     S1 = expm(-1j * B_mat * t) @ expm(-1j * A_mat * t)
@@ -361,12 +479,7 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
     U_exact = expm(-1j * h_total * t_total)
     V_exact = step_exact @ expm(1j * A_mat * t) @ expm(1j * B_mat * t)
 
-    eta = {}
-    for order in s_orders:
-        if F_terms[order]["kind"] == "pair":
-            eta[order] = F_terms[order]["l1_norm"] * (t**order)
-        else:
-            eta[order] = F_terms[order]["sampling_l1_norm"] * (t**order)
+    eta = {order: F_terms[order]["l1_norm"] * (t**order) for order in s_orders}
     eta_pair_sum = float(sum(eta[order] for order in pairable_orders))
     pair_data = paired_channel_parameters(eta_pair_sum)
     pair_scale = pair_data["pair_scale"]
@@ -380,12 +493,12 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
     raw_total = float(sum(raw_weights.values()))
     p_order = np.array([raw_weights[order] / raw_total for order in s_orders], dtype=float)
 
-    pair_component_data = {}
-    pair_component_probs = {}
+    component_data = {}
+    component_probs = {}
     for order in s_orders:
         data = F_terms[order]
+        components = []
         if data["kind"] == "pair":
-            components = []
             probs = np.abs(data["coeffs"]) / data["l1_norm"]
             for prob, coeff, label in zip(probs, data["coeffs"], data["labels"]):
                 phase = coeff / (1j * abs(coeff))
@@ -401,31 +514,22 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
                         "paired_unitary": paired_unitary,
                     }
                 )
-            pair_component_data[order] = components
-            pair_component_probs[order] = np.array([component["prob"] for component in components], dtype=float)
-
-    def apply_phi_channel(order: int, rho: np.ndarray) -> np.ndarray:
-        return apply_ad_commutator(static["Phi_terms"][order], rho)
-
-    def apply_recipe_channel(q_tuple: tuple[int, ...], rho: np.ndarray) -> np.ndarray:
-        out = rho
-        for order in reversed(q_tuple):
-            out = apply_phi_channel(order, out)
-        return out
-
-    def apply_tail_order_channel(order: int, rho: np.ndarray) -> np.ndarray:
-        out = np.zeros_like(rho)
-        for recipe in F_terms[order]["recipes"]:
-            out += recipe["recipe_scale"] * apply_recipe_channel(recipe["q_tuple"], rho)
-        return out
+        else:
+            for component in data["components"]:
+                components.append(
+                    {
+                        "prob": float(abs(component["coeff"]) / data["l1_norm"]),
+                        "phase": component["coeff"] / abs(component["coeff"]),
+                        **{key: value for key, value in component.items() if key != "coeff"},
+                    }
+                )
+        component_data[order] = components
+        component_probs[order] = np.array([component["prob"] for component in components], dtype=float)
 
     def apply_tilde_V_taylor(rho: np.ndarray) -> np.ndarray:
         out = rho.copy()
         for order in s_orders:
-            if F_terms[order]["kind"] == "pair":
-                out += (t**order) * apply_ad_commutator(static["tilde_F_operator_terms"][order], rho)
-            else:
-                out += (t**order) * apply_tail_order_channel(order, rho)
+            out += (t**order) * apply_channel_term(tilde_F_channel_terms[order], rho)
         return out
 
     def apply_pair_component_expectation(component: dict, rho: np.ndarray) -> np.ndarray:
@@ -436,11 +540,11 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
         for order in s_orders:
             weight = raw_weights[order]
             data = F_terms[order]
-            if data["kind"] == "pair":
-                for component in pair_component_data[order]:
+            for component in component_data[order]:
+                if data["kind"] == "pair":
                     out += weight * component["prob"] * apply_pair_component_expectation(component, rho)
-            else:
-                out += weight * apply_tail_order_channel(order, rho) / data["sampling_l1_norm"]
+                else:
+                    out += weight * component["prob"] * component["phase"] * apply_tail_component(component, rho)
         return out
 
     def apply_uncompensated_single_step(rho: np.ndarray) -> np.ndarray:
@@ -491,8 +595,8 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
         "raw_weights": raw_weights,
         "raw_total": raw_total,
         "p_order": p_order,
-        "pair_component_data": pair_component_data,
-        "pair_component_probs": pair_component_probs,
+        "component_data": component_data,
+        "component_probs": component_probs,
         "pair_orders": tuple(pairable_orders),
         "validation_error": validation_error,
         "deterministic_bias": deterministic_bias,
@@ -519,32 +623,32 @@ def sample_channel_then_compensate(
     rho: np.ndarray,
 ):
     """Sample one compensated remainder channel and apply it directly to rho."""
+    del static
+    components = evolution_data["component_data"][order]
+    probs = evolution_data["component_probs"][order]
+    idx = int(rng.choice(len(components), p=probs))
+    component = components[idx]
+
     if order in evolution_data.get("pair_orders", ()):
-        components = evolution_data["pair_component_data"][order]
-        probs = evolution_data["pair_component_probs"][order]
-        idx = int(rng.choice(len(components), p=probs))
-        component = components[idx]
         if rng.random() < evolution_data["unitary_branch_prob"]:
             out = apply_unitary_channel(component["paired_unitary"], rho)
         else:
             out = -(component["W_mat"] @ rho @ component["W_mat"])
         return evolution_data["raw_total"] * out
 
-    tail_data = static["F_terms"][order]
-    recipe_idx = int(rng.choice(len(tail_data["recipes"]), p=tail_data["recipe_probs"]))
-    recipe = tail_data["recipes"][recipe_idx]
-    out = rho
-    for phi_order in reversed(recipe["q_tuple"]):
-        phi_data = static["phi_layer_in_tail_F"][phi_order]
-        component_idx = int(rng.choice(len(phi_data["components"]), p=phi_data["component_probs"]))
-        component = phi_data["components"][component_idx]
-        if rng.random() < 0.5:
-            out = apply_unitary_channel(component["plus_unitary"], out)
-        else:
-            # The negative branch weight is part of the sampled coefficient,
-            # not part of the unitary itself.
-            out = -apply_unitary_channel(component["minus_unitary"], out)
-    return evolution_data["raw_total"] * out
+    return evolution_data["raw_total"] * (component["phase"] * apply_tail_component(component, rho))
+
+
+def sample_compensated_single_step(
+    rng: np.random.Generator,
+    static: dict,
+    evolution_data: dict,
+    rho: np.ndarray,
+) -> np.ndarray:
+    """Sample one full compensated Trotter step and apply it to rho."""
+    rho_after_trotter = apply_unitary_channel(evolution_data["S1"], rho)
+    order = int(rng.choice(static["s_orders"], p=evolution_data["p_order"]))
+    return sample_channel_then_compensate(rng, static, evolution_data, order, rho_after_trotter)
 
 
 def main():
@@ -594,7 +698,11 @@ def main():
     print("pair theta:", evolution_data["theta"])
     print("pair scale:", evolution_data["pair_scale"])
     print("raw weights:", evolution_data["raw_weights"])
-    print("debug channel validation (basis-level):", evolution_data["validation_error"])
+    print("tilde_V compensation-vs-Taylor check:", evolution_data["validation_error"])
+    print("single-step basis error before:", evolution_data["single_step_error_before"])
+    print("single-step basis expectation bias:", evolution_data["single_step_expectation_bias"])
+    print("total basis error before:", evolution_data["uncompensated_total_error"])
+    print("total basis expectation bias:", evolution_data["deterministic_bias"])
 
     rng = np.random.default_rng(seed=args.seed)
 
@@ -602,9 +710,7 @@ def main():
         rho_list = [] if args.save_trials_list else None
         average = np.zeros_like(rho0)
         for _ in tqdm(range(num_trials), desc="single-step channel trials"):
-            rho_after_trotter = apply_unitary_channel(evolution_data["S1"], rho0)
-            order = int(rng.choice(static["s_orders"], p=evolution_data["p_order"]))
-            sample = sample_channel_then_compensate(rng, static, evolution_data, order, rho_after_trotter)
+            sample = sample_compensated_single_step(rng, static, evolution_data, rho0)
             average += sample
             if rho_list is not None:
                 rho_list.append(sample)
@@ -617,12 +723,10 @@ def main():
     single_step_error_before_state = trace_norm(rho_single_before - rho_single_exact)
     single_step_expectation_bias_state = trace_norm(rho_single_deterministic - rho_single_exact)
 
-    print("single-step trace distance before:", single_step_error_before_state)
-    print("single-step trace distance expectation bias:", single_step_expectation_bias_state)
-    print("single-step trace distance sample fluctuation:", single_step_fluctuation)
-    print("single-step trace distance after compensation:", single_step_sample_error)
-    print("debug single-step basis error before:", evolution_data["single_step_error_before"])
-    print("debug single-step basis expectation bias:", evolution_data["single_step_expectation_bias"])
+    print("single-step state error before:", single_step_error_before_state)
+    print("single-step state sample error after compensation:", single_step_sample_error)
+    print("single-step state sample fluctuation:", single_step_fluctuation)
+    print("single-step state expectation bias:", single_step_expectation_bias_state)
 
     def multi_step_channel_sampling(num_trials):
         rho_list = [] if args.save_trials_list else None
@@ -630,9 +734,7 @@ def main():
         for _ in tqdm(range(num_trials), desc="multi-step channel trials"):
             rho = rho0.copy()
             for _ in range(r):
-                rho_after_trotter = apply_unitary_channel(evolution_data["S1"], rho)
-                order = int(rng.choice(static["s_orders"], p=evolution_data["p_order"]))
-                rho = sample_channel_then_compensate(rng, static, evolution_data, order, rho_after_trotter)
+                rho = sample_compensated_single_step(rng, static, evolution_data, rho)
             average += rho
             if rho_list is not None:
                 rho_list.append(rho)
@@ -645,12 +747,10 @@ def main():
     total_error_before_state = trace_norm(rho_total_before - rho_total_exact)
     total_expectation_bias_state = trace_norm(rho_total_deterministic - rho_total_exact)
 
-    print("total trace distance before:", total_error_before_state)
-    print("total trace distance expectation bias:", total_expectation_bias_state)
-    print("total trace distance sample fluctuation:", total_sample_fluctuation)
-    print("total trace distance after compensation:", total_sample_error)
-    print("debug total basis error before:", evolution_data["uncompensated_total_error"])
-    print("debug total basis expectation bias:", evolution_data["deterministic_bias"])
+    print("total state error before:", total_error_before_state)
+    print("multi-step state sample error after compensation:", total_sample_error)
+    print("multi-step state sample fluctuation:", total_sample_fluctuation)
+    print("multi-step state expectation bias:", total_expectation_bias_state)
 
     data_dir = Path("data/no_search")
     data_dir.mkdir(parents=True, exist_ok=True)

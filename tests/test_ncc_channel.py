@@ -13,7 +13,6 @@ def test_ncc_channel_action_on_rho_smoke():
         n=2,
         q0=4,
         s0=4,
-        epsilon=0.1,
         j=1.0,
         h=1.0,
         K=1,
