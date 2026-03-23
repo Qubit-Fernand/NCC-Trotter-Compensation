@@ -1,6 +1,7 @@
 import argparse
 import json
 import math
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +17,12 @@ def build_parser():
     parser.add_argument("--mode", choices=("original", "log"), default="log", help="which NCC variant to run")
     parser.add_argument("--out-dir", type=Path, default=Path("data"), help="output directory")
     parser.add_argument("--tag", type=str, default="", help="optional suffix for output file names")
+    parser.add_argument(
+        "--batch-file",
+        type=Path,
+        default=None,
+        help="optional JSON file listing multiple case overrides to run sequentially in one Python process",
+    )
     parser.add_argument("--N", type=int, default=6, help="number of spins")
     parser.add_argument("--J", type=float, default=1.0, help="interaction strength")
     parser.add_argument("--h", type=float, default=1.0, help="field strength")
@@ -33,6 +40,25 @@ def build_parser():
 
 def parse_args(argv=None):
     return build_parser().parse_args(argv)
+
+
+CASE_FIELDS = {
+    "mode",
+    "out_dir",
+    "tag",
+    "N",
+    "J",
+    "h",
+    "T",
+    "epsilon",
+    "trials",
+    "repeats",
+    "seed",
+    "r_max",
+    "s0",
+    "q0",
+    "save_every_search",
+}
 
 
 def make_search_seed(base_seed: int, repetition: int, r: int) -> int:
@@ -70,6 +96,47 @@ def sampling_output_path(args, q0=None, s0=None) -> Path:
     else:
         stem = f"NCC_original_sampling_r_N{args.N}_T{args.T:g}_eps{args.epsilon:g}_trials{args.trials}_repeats{args.repeats}"
     return output_dir / f"{stem}{suffix}"
+
+
+def load_batch_cases(batch_file: Path) -> list[dict]:
+    payload = json.loads(batch_file.read_text())
+    defaults = {}
+    if isinstance(payload, dict):
+        defaults = payload.get("defaults", {})
+        cases = payload.get("cases")
+    else:
+        cases = payload
+    if not isinstance(cases, list) or not cases:
+        raise ValueError(f"batch file {batch_file} must contain a non-empty case list")
+    if not isinstance(defaults, dict):
+        raise ValueError(f"batch file {batch_file} has non-object defaults")
+
+    default_unknown_keys = sorted(set(defaults) - CASE_FIELDS)
+    if default_unknown_keys:
+        raise ValueError(f"batch file {batch_file} has unsupported default keys: {', '.join(default_unknown_keys)}")
+
+    normalized_cases = []
+    for idx, case in enumerate(cases, start=1):
+        if not isinstance(case, dict):
+            raise ValueError(f"batch case #{idx} in {batch_file} must be an object")
+        unknown_keys = sorted(set(case) - CASE_FIELDS)
+        if unknown_keys:
+            raise ValueError(f"batch case #{idx} in {batch_file} has unsupported keys: {', '.join(unknown_keys)}")
+
+        normalized = dict(defaults)
+        normalized.update(case)
+        if "out_dir" in normalized:
+            normalized["out_dir"] = Path(normalized["out_dir"])
+        normalized_cases.append(normalized)
+    return normalized_cases
+
+
+# copy the (default) args, override with the case-specific values, and return a new Namespace for the case
+def case_args_from_overrides(base_args, overrides: dict):
+    case_args = argparse.Namespace(**vars(deepcopy(base_args)))
+    for key, value in overrides.items():
+        setattr(case_args, key, value)
+    return case_args
 
 
 def grouped_search_array(payload: dict, key: str, fill_value, dtype):
@@ -162,12 +229,16 @@ def estimate_total_sample_error_original(
     for _ in tqdm(range(trials), desc=f"r={r}", leave=False):
         evo = static["identity"].copy()
         for _ in range(r):
-            evo = sample_original_pauli_then_compensate_exp(
-                rng,
-                static,
-                evolution_data["p_s"],
-                evolution_data["eta_sum"],
-            ) @ evolution_data["S1"] @ evo
+            evo = (
+                sample_original_pauli_then_compensate_exp(
+                    rng,
+                    static,
+                    evolution_data["p_s"],
+                    evolution_data["eta_sum"],
+                )
+                @ evolution_data["S1"]
+                @ evo
+            )
         u_total_average += evo
     u_total_average /= trials
     return {
@@ -228,15 +299,19 @@ def estimate_total_sample_error_log(
         evo = identity.copy()
         for _ in range(r):
             order = int(rng.choice(s_orders, p=p_order))
-            evo = sample_log_pauli_then_compensate_exp(
-                rng,
-                identity,
-                f_terms,
-                order,
-                evolution_data["eta_pair_sum"],
-                evolution_data["pair_scale"],
-                raw_total,
-            ) @ evolution_data["S1"] @ evo
+            evo = (
+                sample_log_pauli_then_compensate_exp(
+                    rng,
+                    identity,
+                    f_terms,
+                    order,
+                    evolution_data["eta_pair_sum"],
+                    evolution_data["pair_scale"],
+                    raw_total,
+                )
+                @ evolution_data["S1"]
+                @ evo
+            )
         u_total_average += evo
     u_total_average /= trials
     deterministic = np.linalg.matrix_power(evolution_data["tilde_V"] @ evolution_data["S1"], r)
@@ -349,11 +424,15 @@ def search_r_min(
     return sampled_r_min, sampled_eval, expected_r_min
 
 
-def main(argv=None):
-    args = parse_args(argv)
+def run_case(args, case_index: int | None = None, total_cases: int | None = None):
     args.out_dir.mkdir(parents=True, exist_ok=True)
     config = build_mode_config(args)
     output_path = sampling_output_path(args, config["q0"], config["s0"])
+
+    case_prefix = ""
+    if case_index is not None and total_cases is not None:
+        case_prefix = f"[case {case_index}/{total_cases}] "
+    print(f"{case_prefix}starting mode={args.mode} N={args.N} T={args.T:g} epsilon={args.epsilon:g} " f"trials={args.trials} repeats={args.repeats}")
 
     payload = {
         "script": "NCC_sampling_r.py",
@@ -419,14 +498,29 @@ def main(argv=None):
 
     sampled_r_mins = np.array(payload["sampled_r_mins"], dtype=float)
     mean, ci_low, ci_high = confidence_interval(sampled_r_mins)
-    print("finished search")
-    print(f"mode: {args.mode}")
+    print(f"{case_prefix}finished search")
+    print(f"{case_prefix}mode: {args.mode}")
     print(f"sampled r_min samples: {payload['sampled_r_mins']}")
     print(f"expected r_min samples: {payload['expected_r_mins']}")
     print(f"sampled r_min mean: {mean:.3f}")
     print(f"95% CI for sampled r_min mean: [{ci_low:.3f}, {ci_high:.3f}]")
     print(f"saved checkpoint to: {Path(f'{output_path}.json')}")
     print(f"saved arrays to: {Path(f'{output_path}.npz')}")
+    return output_path
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    if args.batch_file is None:
+        run_case(args)
+        return
+
+    cases = load_batch_cases(args.batch_file)
+    print(f"loaded {len(cases)} cases from {args.batch_file}")
+    for idx, overrides in enumerate(cases, start=1):
+        case_args = case_args_from_overrides(args, overrides)
+        case_args.batch_file = None
+        run_case(case_args, case_index=idx, total_cases=len(cases))
 
 
 if __name__ == "__main__":
