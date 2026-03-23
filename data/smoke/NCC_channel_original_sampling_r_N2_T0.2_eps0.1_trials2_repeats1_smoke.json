@@ -1,0 +1,62 @@
+{
+  "script": "NCC_channel_sampling_r.py",
+  "mode": "original",
+  "params": {
+    "N": 2,
+    "J": 1.0,
+    "h": 1.0,
+    "T": 0.2,
+    "epsilon": 0.1,
+    "trials": 2,
+    "repeats": 1,
+    "base_seed": 7,
+    "r_max": 1024,
+    "s0": null,
+    "q0": null
+  },
+  "sampled_r_mins": [
+    2
+  ],
+  "expected_r_mins": [
+    1
+  ],
+  "sample_errors": [
+    0.02696774318927016
+  ],
+  "expectation_biases": [
+    4.441998464865502e-16
+  ],
+  "sample_fluctuations": [
+    0.026967743189270386
+  ],
+  "ci_low_history": [
+    2.0
+  ],
+  "ci_high_history": [
+    2.0
+  ],
+  "searches": [
+    {
+      "repetition": 0,
+      "r": 1,
+      "sample_error": 0.3305783449473366,
+      "sample_fluctuation": 0.3305783449473367,
+      "expectation_bias": 3.345418587213789e-16,
+      "eta_pair_sum": 0.3093333333333334,
+      "pair_scale": 1.1759032462088215,
+      "raw_total": 1.1759032462088215,
+      "seed": 1016
+    },
+    {
+      "repetition": 0,
+      "r": 2,
+      "sample_error": 0.02696774318927016,
+      "sample_fluctuation": 0.026967743189270386,
+      "expectation_bias": 4.441998464865502e-16,
+      "eta_pair_sum": 0.05866666666666668,
+      "pair_scale": 1.006860025580076,
+      "raw_total": 1.006860025580076,
+      "seed": 2025
+    }
+  ]
+}

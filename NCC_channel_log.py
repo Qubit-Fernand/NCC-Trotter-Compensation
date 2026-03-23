@@ -79,12 +79,6 @@ def parse_args():
         help="max BCH order kept in tilde_F construction (0 => ceil(log(2N/epsilon)))",
     )
     parser.add_argument(
-        "--max_dense_qubits",
-        type=int,
-        default=3,
-        help="small-system guard for sparse channel validation",
-    )
-    parser.add_argument(
         "--save_trials_list",
         action="store_true",
         help="store per-trial output states in the output npz",
@@ -203,6 +197,9 @@ def build_phi_layer_in_tail_F(Phi_terms: dict[int, np.ndarray], n: int, k_order:
             "labels": labels,
             "l1_norm": l1_norm,
             "antiherm_err": antiherm_err,
+            # One ad_{iP} layer is sampled as either +exp(+i pi/4 ad_P)
+            # or -exp(-i pi/4 ad_P), so the executable sampling 1-norm
+            # for this Phi_q layer picks up the expected split factor 2.
             "layer_sampling_l1_norm": 2.0 * l1_norm,
             "components": components,
             "component_probs": np.array([component["prob"] for component in components], dtype=float),
@@ -224,6 +221,8 @@ def build_tail_sampling_recipes(phi_layer_in_tail_F: dict[int, dict], k_order: i
         recipes = []
         max_parts = order // q_min
         for num_parts in range(1, max_parts + 1):
+            # Tail F_s is stored as recipes with j = num_parts layers of ad_{Phi_q}.
+            # The combinatorial coefficient is therefore 1/j!, not 1/s!.
             recipe_scale = 1.0 / math.factorial(num_parts)
             for q_tuple in iter_compositions(order, num_parts, q_min, q0):
                 layer_sampling_l1_product = float(np.prod([phi_layer_in_tail_F[q]["layer_sampling_l1_norm"] for q in q_tuple], dtype=float))
@@ -263,6 +262,9 @@ def paired_channel_parameters(eta_pair_sum: float) -> dict:
     theta = math.asin(min(1.0, max(-1.0, sin_theta)))
     cos_theta = math.cos(theta)
     cos_sq = cos_theta**2
+    # Section 5.2 normalization:
+    # I +/- i eta ad_P = pair_scale * ((1-p) U_theta(.)U_theta^\dagger + p(-P.P))
+    # with pair_scale = (1 + sin^2 theta) / cos^2 theta and p = sin^2 theta / (1 + sin^2 theta).
     pair_scale = (1.0 + sin_theta**2) / cos_sq
     unitary_branch_prob = 1.0 / (1.0 + sin_theta**2)
     return {
@@ -276,13 +278,8 @@ def paired_channel_parameters(eta_pair_sum: float) -> dict:
 
 
 @lru_cache(maxsize=None)
-def build_static_data(n, q0, s0, j=1.0, h=1.0, K=1, max_dense_qubits=3):
+def build_static_data(n, q0, s0, j=1.0, h=1.0, K=1):
     """Precompute r-independent operator data and sampling recipes."""
-    if n > max_dense_qubits:
-        raise ValueError(
-            f"action-on-rho channel prototype only supports N <= {max_dense_qubits}; " f"received N={n}. For larger N, a locality-based sampler is still needed."
-        )
-
     A_mat, B_mat = build_periodic_ab(n, j, h)
     dim = 2**n
     identity = np.eye(dim, dtype=complex)
@@ -366,6 +363,8 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
         if F_terms[order]["kind"] == "pair":
             eta[order] = F_terms[order]["l1_norm"] * (t**order)
         else:
+            # Tail orders use the executable sampling 1-norm of the fully split recipe basis,
+            # then multiply by t^s exactly once at the outer order level.
             eta[order] = F_terms[order]["sampling_l1_norm"] * (t**order)
     eta_pair_sum = float(sum(eta[order] for order in pairable_orders))
     pair_data = paired_channel_parameters(eta_pair_sum)
@@ -374,6 +373,8 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
     raw_weights = {}
     if eta_pair_sum > 0:
         for order in pairable_orders:
+            # Outer order sampling for leading terms follows the note:
+            # weight_s = pair_scale * eta_s / sum_{pair orders} eta_s.
             raw_weights[order] = pair_scale * eta[order] / eta_pair_sum
     for order in tail_orders:
         raw_weights[order] = eta[order]
@@ -440,6 +441,8 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
                 for component in pair_component_data[order]:
                     out += weight * component["prob"] * apply_pair_component_expectation(component, rho)
             else:
+                # Each tail order contributes raw_weight_s times the normalized expectation
+                # of its recipe sampler, i.e. divide by the tail sampling 1-norm here.
                 out += weight * apply_tail_order_channel(order, rho) / data["sampling_l1_norm"]
         return out
 
@@ -539,10 +542,11 @@ def sample_channel_then_compensate(
         component_idx = int(rng.choice(len(phi_data["components"]), p=phi_data["component_probs"]))
         component = phi_data["components"][component_idx]
         if rng.random() < 0.5:
+            # Positive branch: +exp(+i pi/4 ad_P).
             out = apply_unitary_channel(component["plus_unitary"], out)
         else:
-            # The negative branch weight is part of the sampled coefficient,
-            # not part of the unitary itself.
+            # Negative branch: -exp(-i pi/4 ad_P).
+            # The minus sign is part of the sampled coefficient, not the unitary itself.
             out = -apply_unitary_channel(component["minus_unitary"], out)
     return evolution_data["raw_total"] * out
 
@@ -570,7 +574,6 @@ def main():
         j=j,
         h=h,
         K=K,
-        max_dense_qubits=args.max_dense_qubits,
     )
     evolution_data = build_tilde_V(static, t_total, r)
 
@@ -654,7 +657,7 @@ def main():
 
     data_dir = Path("data/no_search")
     data_dir.mkdir(parents=True, exist_ok=True)
-    out = data_dir / f"NCC_channel_trials{trials}_N{args.N}_r{args.r}_q{q0}_s{s0}.npz"
+    out = data_dir / f"NCC_channel_log_trials{trials}_N{args.N}_r{args.r}_q{q0}_s{s0}.npz"
     output_payload = dict(
         rho0=rho0,
         rho_single_exact=rho_single_exact,

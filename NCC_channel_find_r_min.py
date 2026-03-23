@@ -7,7 +7,8 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from NCC_channel_normal import apply_unitary_channel, build_static_data, build_tilde_V, sample_channel_then_compensate, zero_density_matrix
+import NCC_channel_log as ncc_channel_log
+import NCC_channel_original as ncc_channel_original
 
 
 def build_parser():
@@ -26,6 +27,7 @@ def parse_args(argv=None):
 
 
 CASE_FIELDS = {
+    "mode",
     "out_dir",
     "tag",
     "N",
@@ -39,11 +41,11 @@ CASE_FIELDS = {
     "r_max",
     "s0",
     "q0",
-    "max_dense_qubits",
     "save_every_search",
 }
 
 CASE_DEFAULTS = {
+    "mode": "log",
     "out_dir": Path("data"),
     "tag": "",
     "J": 1.0,
@@ -51,14 +53,13 @@ CASE_DEFAULTS = {
     "trials": 1000,
     "repeats": 10,
     "seed": 7,
-    "r_max": 512,
+    "r_max": 1024,
     "s0": 0,
     "q0": 0,
-    "max_dense_qubits": 3,
     "save_every_search": False,
 }
 
-REQUIRED_CASE_FIELDS = {"N", "T", "epsilon"}
+REQUIRED_CASE_FIELDS = {"mode", "N", "T", "epsilon"}
 
 
 def make_search_seed(base_seed: int, repetition: int, r: int) -> int:
@@ -91,7 +92,11 @@ def normalized_tag_suffix(tag: str) -> str:
 def sampling_output_path(args, q0: int, s0: int) -> Path:
     suffix = normalized_tag_suffix(args.tag)
     output_dir = resolve_output_dir(args.out_dir, args.tag)
-    return output_dir / (f"NCC_channel_sampling_r_N{args.N}_T{args.T:g}_eps{args.epsilon:g}_" f"trials{args.trials}_repeats{args.repeats}_q{q0}_s{s0}{suffix}")
+    if args.mode == "original":
+        stem = f"NCC_channel_original_sampling_r_N{args.N}_T{args.T:g}_eps{args.epsilon:g}_trials{args.trials}_repeats{args.repeats}"
+    else:
+        stem = f"NCC_channel_log_sampling_r_N{args.N}_T{args.T:g}_eps{args.epsilon:g}_trials{args.trials}_repeats{args.repeats}_q{q0}_s{s0}"
+    return output_dir / f"{stem}{suffix}"
 
 
 def load_batch_cases(batch_file: Path) -> list[dict]:
@@ -134,6 +139,7 @@ def load_batch_cases(batch_file: Path) -> list[dict]:
 def case_namespace(case: dict):
     return argparse.Namespace(**case)
 
+
 def save_sampling_checkpoint(output_path: Path, payload: dict):
     json_path = Path(f"{output_path}.json")
     json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -144,6 +150,14 @@ def trace_norm(matrix: np.ndarray) -> float:
     return float(np.sum(np.linalg.svd(matrix, compute_uv=False)))
 
 
+def resolve_mode_impl(mode: str):
+    if mode == "original":
+        return ncc_channel_original
+    if mode == "log":
+        return ncc_channel_log
+    raise ValueError(f"unsupported channel mode={mode}")
+
+
 def estimate_total_sample_error(
     static: dict,
     t_total: float,
@@ -152,20 +166,22 @@ def estimate_total_sample_error(
     seed: int,
     evolution_data: dict,
     expectation_bias: float,
+    mode_impl,
 ):
     """Estimate sampled total channel error on rho0 for a fixed r."""
-    rho0 = zero_density_matrix(static["n"])
+    rho0 = mode_impl.zero_density_matrix(static["n"])
     rho_exact = evolution_data["apply_exact_total"](rho0)
     rho_deterministic = evolution_data["apply_compensated_total"](rho0)
 
     rng = np.random.default_rng(seed)
     rho_average = np.zeros_like(rho0)
+    sampled_orders = static.get("s_orders", (2, 3))
     for _ in tqdm(range(trials), desc=f"r={r}", leave=False, disable=not sys.stderr.isatty()):
         rho = rho0.copy()
         for _ in range(r):
-            rho_after_trotter = apply_unitary_channel(evolution_data["S1"], rho)
-            order = int(rng.choice(static["s_orders"], p=evolution_data["p_order"]))
-            rho = sample_channel_then_compensate(rng, static, evolution_data, order, rho_after_trotter)
+            rho_after_trotter = mode_impl.apply_unitary_channel(evolution_data["S1"], rho)
+            order = int(rng.choice(sampled_orders, p=evolution_data["p_order"]))
+            rho = mode_impl.sample_channel_then_compensate(rng, static, evolution_data, order, rho_after_trotter)
         rho_average += rho
     rho_average /= trials
 
@@ -191,6 +207,7 @@ def search_r_min(
     searches: list[dict],
     progress_label: str,
     checkpoint_cb=None,
+    mode_impl=None,
 ):
     """Search sampled and expected r_min while reusing cached search results."""
     result_cache: dict[int, dict] = {}
@@ -199,8 +216,8 @@ def search_r_min(
         def evaluate_at_r(r: int) -> dict:
             if metric_key == "expectation_bias":
                 if r not in evolution_cache:
-                    evolution_cache[r] = build_tilde_V(static, t_total, r)
-                rho0 = zero_density_matrix(static["n"])
+                    evolution_cache[r] = mode_impl.build_tilde_V(static, t_total, r)
+                rho0 = mode_impl.zero_density_matrix(static["n"])
                 rho_exact = evolution_cache[r]["apply_exact_total"](rho0)
                 rho_deterministic = evolution_cache[r]["apply_compensated_total"](rho0)
                 return {"expectation_bias": trace_norm(rho_deterministic - rho_exact)}
@@ -210,9 +227,9 @@ def search_r_min(
                     return result_cache[r]
                 seed = make_search_seed(base_seed, repetition, r)
                 if r not in evolution_cache:
-                    evolution_cache[r] = build_tilde_V(static, t_total, r)
+                    evolution_cache[r] = mode_impl.build_tilde_V(static, t_total, r)
                 evolution_data = evolution_cache[r]
-                rho0 = zero_density_matrix(static["n"])
+                rho0 = mode_impl.zero_density_matrix(static["n"])
                 rho_exact = evolution_data["apply_exact_total"](rho0)
                 rho_deterministic = evolution_data["apply_compensated_total"](rho0)
                 result = estimate_total_sample_error(
@@ -223,6 +240,7 @@ def search_r_min(
                     seed=seed,
                     evolution_data=evolution_data,
                     expectation_bias=trace_norm(rho_deterministic - rho_exact),
+                    mode_impl=mode_impl,
                 )
                 result["seed"] = seed
                 result_cache[r] = result
@@ -266,23 +284,24 @@ def run_case(args, case_index=None, total_cases=None):
     case_prefix = ""
     if case_index is not None and total_cases is not None:
         case_prefix = f"[case {case_index}/{total_cases}] "
-    s0 = int(np.ceil(np.log(4 / args.epsilon))) if args.s0 <= 0 else args.s0
-    s0 = max(3, s0)
-    q0 = int(np.ceil(np.log(2 * args.N / args.epsilon))) if args.q0 <= 0 else args.q0
-    q0 = max(3, q0)
+    mode_impl = resolve_mode_impl(args.mode)
+    if args.mode == "original":
+        s0 = None
+        q0 = None
+    else:
+        s0 = int(np.ceil(np.log(4 / args.epsilon))) if args.s0 <= 0 else args.s0
+        s0 = max(3, s0)
+        q0 = int(np.ceil(np.log(2 * args.N / args.epsilon))) if args.q0 <= 0 else args.q0
+        q0 = max(3, q0)
     output_path = sampling_output_path(args, q0, s0)
-    static = build_static_data(
-        n=args.N,
-        q0=q0,
-        s0=s0,
-        j=args.J,
-        h=args.h,
-        K=1,
-        max_dense_qubits=args.max_dense_qubits,
-    )
+    if args.mode == "original":
+        static = mode_impl.build_static_data(n=args.N, j=args.J, h=args.h)
+    else:
+        static = mode_impl.build_static_data(n=args.N, q0=q0, s0=s0, j=args.J, h=args.h, K=1)
     evolution_cache: dict[int, dict] = {}
     payload = {
         "script": "NCC_channel_sampling_r.py",
+        "mode": args.mode,
         "params": {
             "N": args.N,
             "J": args.J,
@@ -295,7 +314,6 @@ def run_case(args, case_index=None, total_cases=None):
             "r_max": args.r_max,
             "s0": s0,
             "q0": q0,
-            "max_dense_qubits": args.max_dense_qubits,
         },
         "sampled_r_mins": [],
         "expected_r_mins": [],
@@ -324,6 +342,7 @@ def run_case(args, case_index=None, total_cases=None):
             searches=payload["searches"],
             progress_label=label,
             checkpoint_cb=checkpoint if args.save_every_search else None,
+            mode_impl=mode_impl,
         )
         payload["sampled_r_mins"].append(int(sampled_r_min))
         payload["expected_r_mins"].append(-1 if expected_r_min is None else int(expected_r_min))

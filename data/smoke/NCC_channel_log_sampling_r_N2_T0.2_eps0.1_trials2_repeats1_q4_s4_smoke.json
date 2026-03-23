@@ -1,5 +1,6 @@
 {
   "script": "NCC_channel_sampling_r.py",
+  "mode": "log",
   "params": {
     "N": 2,
     "J": 1.0,
@@ -9,7 +10,7 @@
     "trials": 2,
     "repeats": 1,
     "base_seed": 7,
-    "r_max": 512,
+    "r_max": 1024,
     "s0": 4,
     "q0": 4
   },

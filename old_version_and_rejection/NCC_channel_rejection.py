@@ -12,7 +12,7 @@ import numpy as np
 from scipy.linalg import expm
 from tqdm import tqdm
 
-from NCC_channel_normal import (
+from NCC_channel_log import (
     apply_channel_term,
     build_static_data as build_channel_static_data,
     build_tilde_V as build_channel_tilde_V,
@@ -314,7 +314,7 @@ def V_exact_action_on_rho(n: int, q0: int, s0: int, coupling_j: float, field_h: 
     A_mat = x * A_mat
     B_mat = x * B_mat
     phi_terms = phi_term(A_mat, B_mat, q0)
-    from NCC_channel_normal import channel_term_from_operator_pauli, build_sparse_tilde_F_terms
+    from NCC_channel_log import channel_term_from_operator_pauli, build_sparse_tilde_F_terms
     from Pauli_Hamiltonian_BCH import pauli_decomposition_stream
 
     phi_channel_terms = {}

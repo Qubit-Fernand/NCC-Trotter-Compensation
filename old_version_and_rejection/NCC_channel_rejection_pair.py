@@ -8,7 +8,7 @@ import numpy as np
 from scipy.linalg import expm
 from tqdm import tqdm
 
-from NCC_channel_normal import (
+from NCC_channel_log import (
     apply_channel_term,
     build_static_data as build_channel_static_data,
     build_tilde_V as build_channel_tilde_V,
