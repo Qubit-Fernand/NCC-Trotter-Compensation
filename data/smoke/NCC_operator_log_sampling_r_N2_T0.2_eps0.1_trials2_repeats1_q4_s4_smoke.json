@@ -1,0 +1,56 @@
+{
+  "script": "NCC_operator_find_r_min.py",
+  "mode": "log",
+  "params": {
+    "N": 2,
+    "J": 1.0,
+    "h": 1.0,
+    "T": 0.2,
+    "epsilon": 0.1,
+    "trials": 2,
+    "repeats": 1,
+    "base_seed": 7,
+    "r_max": 8,
+    "q0": 4,
+    "s0": 4
+  },
+  "sampled_r_mins": [
+    2
+  ],
+  "expected_r_mins": [
+    1
+  ],
+  "sample_errors": [
+    0.06735989727152514
+  ],
+  "expectation_biases": [
+    0.0013065660551686527
+  ],
+  "sample_fluctuations": [
+    0.06646739729663355
+  ],
+  "ci_low_history": [
+    2.0
+  ],
+  "ci_high_history": [
+    2.0
+  ],
+  "searches": [
+    {
+      "repetition": 0,
+      "r": 1,
+      "sample_error": 0.2650388837652544,
+      "sample_fluctuation": 0.27987495115984473,
+      "expectation_bias": 0.02208506186675048,
+      "seed": 1016
+    },
+    {
+      "repetition": 0,
+      "r": 2,
+      "sample_error": 0.06735989727152514,
+      "sample_fluctuation": 0.06646739729663355,
+      "expectation_bias": 0.0013065660551686527,
+      "seed": 2025
+    }
+  ]
+}

@@ -6,8 +6,8 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-import NCC_log as ncc_log
-import NCC_original as ncc_original
+import NCC_operator_log as ncc_log
+import NCC_operator_original as ncc_original
 from Pauli_Hamiltonian_BCH import cached_pauli_matrix_from_label
 
 

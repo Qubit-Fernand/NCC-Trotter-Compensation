@@ -23,7 +23,7 @@ import numpy as np
 from scipy.linalg import expm
 from tqdm import tqdm
 
-from NCC_log import (
+from NCC_operator_log import (
     build_periodic_ab,
     cached_pauli_matrix_from_label,
     pauli_decomposition_stream,
