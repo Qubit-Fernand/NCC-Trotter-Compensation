@@ -140,9 +140,48 @@ def case_namespace(case: dict):
     return argparse.Namespace(**case)
 
 
+def grouped_search_array(payload: dict, key: str, fill_value, dtype):
+    grouped: dict[int, list] = {}
+    for item in payload["searches"]:
+        grouped.setdefault(int(item["repetition"]), []).append(item[key])
+    if not grouped:
+        return np.empty((0, 0), dtype=dtype), np.empty((0,), dtype=int)
+    reps = sorted(grouped)
+    lengths = np.array([len(grouped[rep]) for rep in reps], dtype=int)
+    width = int(lengths.max())
+    array = np.full((len(reps), width), fill_value, dtype=dtype)
+    for row, rep in enumerate(reps):
+        values = np.array(grouped[rep], dtype=dtype)
+        array[row, : len(values)] = values
+    return array, lengths
+
+
 def save_sampling_checkpoint(output_path: Path, payload: dict):
     json_path = Path(f"{output_path}.json")
+    npz_path = Path(f"{output_path}.npz")
     json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+    searched_r, searched_lengths = grouped_search_array(payload, "r", -1, int)
+    searched_seed, _ = grouped_search_array(payload, "seed", -1, int)
+    searched_sample_error, _ = grouped_search_array(payload, "sample_error", np.nan, float)
+    searched_expectation_bias, _ = grouped_search_array(payload, "expectation_bias", np.nan, float)
+    searched_sample_fluctuation, _ = grouped_search_array(payload, "sample_fluctuation", np.nan, float)
+    np.savez(
+        npz_path,
+        sampled_r_mins=np.array(payload["sampled_r_mins"], dtype=int),
+        expected_r_mins=np.array(payload["expected_r_mins"], dtype=int),
+        sample_errors=np.array(payload["sample_errors"], dtype=float),
+        expectation_biases=np.array(payload["expectation_biases"], dtype=float),
+        sample_fluctuations=np.array(payload["sample_fluctuations"], dtype=float),
+        low_bounds=np.array(payload["ci_low_history"], dtype=float),
+        high_bounds=np.array(payload["ci_high_history"], dtype=float),
+        searched_repetition=np.array([item["repetition"] for item in payload["searches"]], dtype=int),
+        searched_lengths=searched_lengths,
+        searched_r=searched_r,
+        searched_seed=searched_seed,
+        searched_sample_error=searched_sample_error,
+        searched_expectation_bias=searched_expectation_bias,
+        searched_sample_fluctuation=searched_sample_fluctuation,
+    )
 
 
 def trace_norm(matrix: np.ndarray) -> float:
