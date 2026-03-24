@@ -94,6 +94,14 @@ def zero_density_matrix(num_qubits: int) -> np.ndarray:
     return rho
 
 
+def one_density_matrix(num_qubits: int) -> np.ndarray:
+    """Return |1...1><1...1|."""
+    dim = 2**num_qubits
+    rho = np.zeros((dim, dim), dtype=complex)
+    rho[-1, -1] = 1.0
+    return rho
+
+
 def apply_unitary_channel(unitary: np.ndarray, rho: np.ndarray) -> np.ndarray:
     """Apply rho -> U rho U^dagger."""
     return unitary @ rho @ unitary.conj().T
@@ -123,29 +131,12 @@ def multiply_pauli_labels(label_a: tuple[int, ...], label_b: tuple[int, ...]) ->
     return phase, tuple(product)
 
 
-def iter_matrix_units(dim: int):
-    """Yield the matrix-unit basis E_ij."""
-    for row in range(dim):
-        for col in range(dim):
-            basis = np.zeros((dim, dim), dtype=complex)
-            basis[row, col] = 1.0
-            yield basis
-
-
-def basis_action_distance(action_a, action_b, dim: int) -> float:
-    """Maximum Frobenius error on the matrix-unit basis."""
-    max_err = 0.0
-    for basis in iter_matrix_units(dim):
-        diff = action_a(basis) - action_b(basis)
-        max_err = max(max_err, float(np.linalg.norm(diff, ord="fro")))
-    return max_err
-
-
 def trace_norm(matrix: np.ndarray) -> float:
     """Return the trace norm (Schatten-1 norm) of a matrix."""
     return float(np.sum(np.linalg.svd(matrix, compute_uv=False)))
 
 
+# used for F_s into Phi_q_tuple decompostion.
 def iter_compositions(total: int, parts: int, lower: int, upper: int):
     """Yield ordered compositions with bounded part sizes."""
     if parts == 1:
@@ -173,14 +164,14 @@ def build_phi_layer_in_tail_F(Phi_terms: dict[int, np.ndarray], n: int, k_order:
             raise ValueError(f"Phi_{order} is not anti-Hermitian enough for channel sampling (antiherm_err={antiherm_err:.3e})")
         coeffs, labels, l1_norm = pauli_decomposition_stream(Phi_terms[order], antihermitian=True)
         probs = np.abs(coeffs) / l1_norm
-        components = []
+        Paulis = []
         for prob, coeff, label in zip(probs, coeffs, labels):
             pauli_sign = coeff / (1j * abs(coeff))
             if abs(np.imag(pauli_sign)) > 1e-10 or not np.isclose(abs(np.real(pauli_sign)), 1.0, atol=1e-10):
                 raise ValueError(f"Phi_{order} Pauli coefficient has unexpected phase {pauli_sign}")
             pauli_sign = float(np.real(pauli_sign))
             pauli_mat = cached_pauli_matrix_from_label(label)
-            components.append(
+            Paulis.append(
                 {
                     "prob": float(prob),
                     "pauli_sign": pauli_sign,
@@ -201,49 +192,54 @@ def build_phi_layer_in_tail_F(Phi_terms: dict[int, np.ndarray], n: int, k_order:
             # or -exp(-i pi/4 ad_P), so the executable sampling 1-norm
             # for this Phi_q layer picks up the expected split factor 2.
             "layer_sampling_l1_norm": 2.0 * l1_norm,
-            "components": components,
-            "component_probs": np.array([component["prob"] for component in components], dtype=float),
+            "Paulis": Paulis,
+            "Pauli_probs": np.array([Pauli["prob"] for Pauli in Paulis], dtype=float),
         }
     return phi_layer_in_tail_F
 
 
-def build_tail_sampling_recipes(phi_layer_in_tail_F: dict[int, dict], k_order: int, q0: int, s0: int):
+def tail_sampling_ad_phi_tuples(phi_layer_in_tail_F: dict[int, dict], k_order: int, q0: int, s0: int):
     """
-    Build tail recipes without explicitly materializing F_channel.
+    Build tail phi_tuples without explicitly materializing F_channel.
 
     For tail orders we only store how F_{K,s} is assembled as products of
     ad_{Phi_q}. When sampling, each ad_{Phi_q} is expanded into Pauli terms and
     each ad_{iP} is sampled as either +e^{+i pi/4 ad_P} or -e^{-i pi/4 ad_P}.
     """
-    tail_recipe_terms = {}
+    tail_phi_tuple_terms = {}
     q_min = k_order + 1
     for order in range(2 * k_order + 2, s0 + 1):
-        recipes = []
+        phi_tuples = []
         max_parts = order // q_min
         for num_parts in range(1, max_parts + 1):
-            # Tail F_s is stored as recipes with j = num_parts layers of ad_{Phi_q}.
+            # Tail F_s is stored as phi_tuples with j = num_parts layers of ad_{Phi_q}.
             # The combinatorial coefficient is therefore 1/j!, not 1/s!.
-            recipe_scale = 1.0 / math.factorial(num_parts)
+            factorial_j_scale = 1.0 / math.factorial(num_parts)
             for q_tuple in iter_compositions(order, num_parts, q_min, q0):
+                layer_l1_norm_product = float(np.prod([phi_layer_in_tail_F[q]["l1_norm"] for q in q_tuple], dtype=float))
                 layer_sampling_l1_product = float(np.prod([phi_layer_in_tail_F[q]["layer_sampling_l1_norm"] for q in q_tuple], dtype=float))
-                recipes.append(
+                phi_tuples.append(
                     {
                         "q_tuple": q_tuple,
-                        "recipe_scale": recipe_scale,
+                        "factorial_j_scale": factorial_j_scale,
+                        "layer_l1_norm_product": layer_l1_norm_product,
                         "layer_sampling_l1_product": layer_sampling_l1_product,
-                        "sampling_weight": recipe_scale * layer_sampling_l1_product,
+                        "eta_weight": factorial_j_scale * layer_l1_norm_product,
+                        "sampling_weight": factorial_j_scale * layer_sampling_l1_product,
                     }
                 )
-        if not recipes:
-            raise ValueError(f"tail order s={order} has no valid Phi-composition recipes")
-        sampling_l1_norm = float(sum(recipe["sampling_weight"] for recipe in recipes))
-        recipe_probs = np.array([recipe["sampling_weight"] / sampling_l1_norm for recipe in recipes], dtype=float)
-        tail_recipe_terms[order] = {
-            "recipes": recipes,
+        if not phi_tuples:
+            raise ValueError(f"tail order s={order} has no valid Phi-composition phi_tuples")
+        eta_l1_norm = float(sum(phi_tuple["eta_weight"] for phi_tuple in phi_tuples))
+        sampling_l1_norm = float(sum(phi_tuple["sampling_weight"] for phi_tuple in phi_tuples))
+        phi_tuple_probs = np.array([phi_tuple["sampling_weight"] / sampling_l1_norm for phi_tuple in phi_tuples], dtype=float)
+        tail_phi_tuple_terms[order] = {
+            "phi_tuples": phi_tuples,
+            "eta_l1_norm": eta_l1_norm,
             "sampling_l1_norm": sampling_l1_norm,
-            "recipe_probs": recipe_probs,
+            "phi_tuple_probs": phi_tuple_probs,
         }
-    return tail_recipe_terms
+    return tail_phi_tuple_terms
 
 
 def paired_channel_parameters(eta_pair_sum: float) -> dict:
@@ -279,7 +275,7 @@ def paired_channel_parameters(eta_pair_sum: float) -> dict:
 
 @lru_cache(maxsize=None)
 def build_static_data(n, q0, s0, j=1.0, h=1.0, K=1):
-    """Precompute r-independent operator data and sampling recipes."""
+    """Precompute r-independent operator data and sampling phi_tuples."""
     A_mat, B_mat = build_periodic_ab(n, j, h)
     dim = 2**n
     identity = np.eye(dim, dtype=complex)
@@ -287,7 +283,7 @@ def build_static_data(n, q0, s0, j=1.0, h=1.0, K=1):
     Phi_terms = phi_term(A_mat, B_mat, q0)
     tilde_F_operator_terms = tilde_F_term(Phi_terms, K, q0, s0)
     phi_layer_in_tail_F = build_phi_layer_in_tail_F(Phi_terms, n, K, q0)
-    tail_recipe_terms = build_tail_sampling_recipes(phi_layer_in_tail_F, K, q0, s0)
+    tail_phi_tuple_terms = tail_sampling_ad_phi_tuples(phi_layer_in_tail_F, K, q0, s0)
 
     F_terms = {}
     pairable_orders = []
@@ -315,7 +311,7 @@ def build_static_data(n, q0, s0, j=1.0, h=1.0, K=1):
             tail_orders.append(order)
             F_terms[order] = {
                 "kind": "tail",
-                **tail_recipe_terms[order],
+                **tail_phi_tuple_terms[order],
             }
 
     return {
@@ -341,6 +337,7 @@ def build_static_data(n, q0, s0, j=1.0, h=1.0, K=1):
 
 def build_tilde_V(static, t_total, r, validation_tol=1e-10):
     """Build action-on-rho data for one step size."""
+    # step t/r is absorbed into the per-order coefficients below.
     A_mat = static["A_mat"]
     B_mat = static["B_mat"]
     h_total = static["h_total"]
@@ -363,12 +360,15 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
         if F_terms[order]["kind"] == "pair":
             eta[order] = F_terms[order]["l1_norm"] * (t**order)
         else:
-            # Tail orders use the executable sampling 1-norm of the fully split recipe basis,
-            # then multiply by t^s exactly once at the outer order level.
-            eta[order] = F_terms[order]["sampling_l1_norm"] * (t**order)
+            # For tail orders, eta keeps the Pauli-1-norm semantics only:
+            # eta_s = (sum over phi-tuples of 1/j! * prod_q ||Phi_q||_1) * t^s.
+            eta[order] = F_terms[order]["eta_l1_norm"] * (t**order)
+            # The executable sampler carries extra split factors from each ad_{iP} layer,
+            # so keep its outer coefficient under a separate name.
+
     eta_pair_sum = float(sum(eta[order] for order in pairable_orders))
-    pair_data = paired_channel_parameters(eta_pair_sum)
-    pair_scale = pair_data["pair_scale"]
+    pair_params = paired_channel_parameters(eta_pair_sum)
+    pair_scale = pair_params["pair_scale"]
 
     raw_weights = {}
     if eta_pair_sum > 0:
@@ -377,16 +377,16 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
             # weight_s = pair_scale * eta_s / sum_{pair orders} eta_s.
             raw_weights[order] = pair_scale * eta[order] / eta_pair_sum
     for order in tail_orders:
-        raw_weights[order] = eta[order]
-    raw_total = float(sum(raw_weights.values()))
-    p_order = np.array([raw_weights[order] / raw_total for order in s_orders], dtype=float)
+        # 2^j compared to eta because each ad_{Phi_q} layer is sampled as either +exp(+i pi/4 ad_P) or -exp(-i pi/4 ad_P).
+        raw_weights[order] = F_terms[order]["sampling_l1_norm"]
+    raw_l1_norm_total = float(sum(raw_weights.values()))
+    p_order = np.array([raw_weights[order] / raw_l1_norm_total for order in s_orders], dtype=float)
 
-    pair_component_data = {}
-    pair_component_probs = {}
+    pair_components = {}
     for order in s_orders:
         data = F_terms[order]
         if data["kind"] == "pair":
-            components = []
+            Paulis = []
             probs = np.abs(data["coeffs"]) / data["l1_norm"]
             for prob, coeff, label in zip(probs, data["coeffs"], data["labels"]):
                 phase = coeff / (1j * abs(coeff))
@@ -394,94 +394,56 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
                 hermitian_err = float(np.linalg.norm(W_mat - W_mat.conj().T, ord="fro"))
                 if hermitian_err > 1e-10:
                     raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
-                paired_unitary = pair_data["cos_theta"] * identity + 1j * pair_data["sin_theta"] * W_mat
-                components.append(
+                # e^{i theta Pauli} = cos(theta) I + i sin(theta) Pauli
+                rotation_branch_in_pair = pair_params["cos_theta"] * identity + 1j * pair_params["sin_theta"] * W_mat
+                Paulis.append(
                     {
                         "prob": float(prob),
                         "W_mat": W_mat,
-                        "paired_unitary": paired_unitary,
+                        "rotation_branch_in_pair": rotation_branch_in_pair,
                     }
                 )
-            pair_component_data[order] = components
-            pair_component_probs[order] = np.array([component["prob"] for component in components], dtype=float)
+            pair_components[order] = Paulis
 
-    def apply_phi_channel(order: int, rho: np.ndarray) -> np.ndarray:
-        return apply_ad_commutator(static["Phi_terms"][order], rho)
-
-    def apply_recipe_channel(q_tuple: tuple[int, ...], rho: np.ndarray) -> np.ndarray:
-        out = rho
-        for order in reversed(q_tuple):
-            out = apply_phi_channel(order, out)
-        return out
-
-    def apply_tail_order_channel(order: int, rho: np.ndarray) -> np.ndarray:
+    # F_s(rho) = sum 1/j! * ad_phi_q1 ad_phi_q2(rho)
+    def apply_tail_F_channel(order: int, rho: np.ndarray) -> np.ndarray:
         out = np.zeros_like(rho)
-        for recipe in F_terms[order]["recipes"]:
-            out += recipe["recipe_scale"] * apply_recipe_channel(recipe["q_tuple"], rho)
+        for phi_tuple in F_terms[order]["phi_tuples"]:
+            tuple_out = rho
+            for phi_order in reversed(phi_tuple["q_tuple"]):
+                tuple_out = apply_ad_commutator(static["Phi_terms"][phi_order], tuple_out)
+            out += phi_tuple["factorial_j_scale"] * tuple_out
         return out
 
+    # tilde_V(rho) = sum F_s(rho)
     def apply_tilde_V_taylor(rho: np.ndarray) -> np.ndarray:
         out = rho.copy()
         for order in s_orders:
             if F_terms[order]["kind"] == "pair":
                 out += (t**order) * apply_ad_commutator(static["tilde_F_operator_terms"][order], rho)
             else:
-                out += (t**order) * apply_tail_order_channel(order, rho)
+                out += (t**order) * apply_tail_F_channel(order, rho)
         return out
 
-    def apply_pair_component_expectation(component: dict, rho: np.ndarray) -> np.ndarray:
-        return (rho + eta_pair_sum * apply_ad_commutator(1j * component["W_mat"], rho)) / pair_scale
-
-    def apply_tilde_V_compensation(rho: np.ndarray) -> np.ndarray:
+    def apply_tilde_V_expectation(rho: np.ndarray) -> np.ndarray:
         out = np.zeros_like(rho)
         for order in s_orders:
             weight = raw_weights[order]
             data = F_terms[order]
             if data["kind"] == "pair":
-                for component in pair_component_data[order]:
-                    out += weight * component["prob"] * apply_pair_component_expectation(component, rho)
+                for Pauli in pair_components[order]:
+                    # for this part, weight contains eta_2/eta * pair_scale
+                    # eta_2/eta * pair_scale (I + i eta ad_W)/pair_sacle
+                    out += weight * Pauli["prob"] * (rho + eta_pair_sum * apply_ad_commutator(1j * Pauli["W_mat"], rho)) / pair_scale
             else:
-                # Each tail order contributes raw_weight_s times the normalized expectation
-                # of its recipe sampler, i.e. divide by the tail sampling 1-norm here.
-                out += weight * apply_tail_order_channel(order, rho) / data["sampling_l1_norm"]
+                # for this part, weight contains sum 2^j eta_s = data["sampling_l1_norm"]
+                out += weight * apply_tail_F_channel(order, rho) / data["sampling_l1_norm"]
         return out
 
-    def apply_uncompensated_single_step(rho: np.ndarray) -> np.ndarray:
-        return apply_unitary_channel(S1, rho)
-
-    def apply_exact_single_step(rho: np.ndarray) -> np.ndarray:
-        return apply_unitary_channel(step_exact, rho)
-
-    def apply_compensated_single_step(rho: np.ndarray) -> np.ndarray:
-        return apply_tilde_V_compensation(apply_uncompensated_single_step(rho))
-
-    def repeat_action(action, rho: np.ndarray, num_steps: int) -> np.ndarray:
-        out = rho.copy()
-        for _ in range(num_steps):
-            out = action(out)
-        return out
-
-    def apply_uncompensated_total(rho: np.ndarray) -> np.ndarray:
-        return repeat_action(apply_uncompensated_single_step, rho, r)
-
-    def apply_compensated_total(rho: np.ndarray) -> np.ndarray:
-        return repeat_action(apply_compensated_single_step, rho, r)
-
-    def apply_exact_total(rho: np.ndarray) -> np.ndarray:
-        return apply_unitary_channel(U_exact, rho)
-
-    validation_error = basis_action_distance(apply_tilde_V_compensation, apply_tilde_V_taylor, dim)
+    validation_states = (zero_density_matrix(static["n"]), one_density_matrix(static["n"]))
+    validation_error = max(trace_norm(apply_tilde_V_expectation(rho) - apply_tilde_V_taylor(rho)) for rho in validation_states)
     if validation_error > validation_tol:
         raise ValueError(f"channel tilde_V mismatch between compensation expectation and Taylor action: {validation_error:.3e}")
-
-    deterministic_bias = basis_action_distance(apply_compensated_total, apply_exact_total, dim)
-    uncompensated_total_error = basis_action_distance(apply_uncompensated_total, apply_exact_total, dim)
-    single_step_error_before = basis_action_distance(apply_uncompensated_single_step, apply_exact_single_step, dim)
-    single_step_expectation_bias = basis_action_distance(
-        apply_compensated_single_step,
-        apply_exact_single_step,
-        dim,
-    )
 
     return {
         "t": t,
@@ -492,25 +454,14 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
         "eta": eta,
         "eta_pair_sum": eta_pair_sum,
         "raw_weights": raw_weights,
-        "raw_total": raw_total,
+        "raw_l1_norm_total": raw_l1_norm_total,
         "p_order": p_order,
-        "pair_component_data": pair_component_data,
-        "pair_component_probs": pair_component_probs,
+        "pair_data": pair_components,
         "pair_orders": tuple(pairable_orders),
         "validation_error": validation_error,
-        "deterministic_bias": deterministic_bias,
-        "uncompensated_total_error": uncompensated_total_error,
-        "single_step_error_before": single_step_error_before,
-        "single_step_expectation_bias": single_step_expectation_bias,
         "apply_tilde_V_taylor": apply_tilde_V_taylor,
-        "apply_tilde_V_compensation": apply_tilde_V_compensation,
-        "apply_uncompensated_single_step": apply_uncompensated_single_step,
-        "apply_compensated_single_step": apply_compensated_single_step,
-        "apply_exact_single_step": apply_exact_single_step,
-        "apply_uncompensated_total": apply_uncompensated_total,
-        "apply_compensated_total": apply_compensated_total,
-        "apply_exact_total": apply_exact_total,
-        **pair_data,
+        "apply_tilde_V_expectation": apply_tilde_V_expectation,
+        **pair_params,
     }
 
 
@@ -523,32 +474,32 @@ def sample_channel_then_compensate(
 ):
     """Sample one compensated remainder channel and apply it directly to rho."""
     if order in evolution_data.get("pair_orders", ()):
-        components = evolution_data["pair_component_data"][order]
-        probs = evolution_data["pair_component_probs"][order]
-        idx = int(rng.choice(len(components), p=probs))
-        component = components[idx]
+        Paulis = evolution_data["pair_data"][order]
+        probs = np.array([Pauli["prob"] for Pauli in Paulis], dtype=float)
+        idx = int(rng.choice(len(Paulis), p=probs))
+        Pauli = Paulis[idx]
         if rng.random() < evolution_data["unitary_branch_prob"]:
-            out = apply_unitary_channel(component["paired_unitary"], rho)
+            out = apply_unitary_channel(Pauli["rotation_branch_in_pair"], rho)
         else:
-            out = -(component["W_mat"] @ rho @ component["W_mat"])
-        return evolution_data["raw_total"] * out
+            out = -(Pauli["W_mat"] @ rho @ Pauli["W_mat"])
+        return evolution_data["raw_l1_norm_total"] * out
 
     tail_data = static["F_terms"][order]
-    recipe_idx = int(rng.choice(len(tail_data["recipes"]), p=tail_data["recipe_probs"]))
-    recipe = tail_data["recipes"][recipe_idx]
+    phi_tuple_idx = int(rng.choice(len(tail_data["phi_tuples"]), p=tail_data["phi_tuple_probs"]))
+    phi_tuple = tail_data["phi_tuples"][phi_tuple_idx]
     out = rho
-    for phi_order in reversed(recipe["q_tuple"]):
+    for phi_order in reversed(phi_tuple["q_tuple"]):
         phi_data = static["phi_layer_in_tail_F"][phi_order]
-        component_idx = int(rng.choice(len(phi_data["components"]), p=phi_data["component_probs"]))
-        component = phi_data["components"][component_idx]
+        Pauli_idx = int(rng.choice(len(phi_data["Paulis"]), p=phi_data["Pauli_probs"]))
+        Pauli = phi_data["Paulis"][Pauli_idx]
         if rng.random() < 0.5:
             # Positive branch: +exp(+i pi/4 ad_P).
-            out = apply_unitary_channel(component["plus_unitary"], out)
+            out = apply_unitary_channel(Pauli["plus_unitary"], out)
         else:
             # Negative branch: -exp(-i pi/4 ad_P).
             # The minus sign is part of the sampled coefficient, not the unitary itself.
-            out = -apply_unitary_channel(component["minus_unitary"], out)
-    return evolution_data["raw_total"] * out
+            out = -apply_unitary_channel(Pauli["minus_unitary"], out)
+    return evolution_data["raw_l1_norm_total"] * out
 
 
 def main():
@@ -577,14 +528,17 @@ def main():
     )
     evolution_data = build_tilde_V(static, t_total, r)
 
-    rho0 = zero_density_matrix(n)
-    rho_single_exact = evolution_data["apply_exact_single_step"](rho0)
-    rho_single_before = evolution_data["apply_uncompensated_single_step"](rho0)
-    rho_single_deterministic = evolution_data["apply_compensated_single_step"](rho0)
+    rho0 = one_density_matrix(n)
+    rho_single_exact = apply_unitary_channel(evolution_data["step_exact"], rho0)
+    rho_single_before = apply_unitary_channel(evolution_data["S1"], rho0)
+    rho_single_deterministic = evolution_data["apply_tilde_V_expectation"](rho_single_before)
 
-    rho_total_exact = evolution_data["apply_exact_total"](rho0)
-    rho_total_before = evolution_data["apply_uncompensated_total"](rho0)
-    rho_total_deterministic = evolution_data["apply_compensated_total"](rho0)
+    rho_total_exact = apply_unitary_channel(evolution_data["U_exact"], rho0)
+    rho_total_before = rho0.copy()
+    rho_total_deterministic = rho0.copy()
+    for _ in range(r):
+        rho_total_before = apply_unitary_channel(evolution_data["S1"], rho_total_before)
+        rho_total_deterministic = evolution_data["apply_tilde_V_expectation"](apply_unitary_channel(evolution_data["S1"], rho_total_deterministic))
 
     print("action-on-rho channel prototype:", True)
     print("N:", n, "q0:", q0, "s0:", s0, "r:", r)
@@ -594,10 +548,11 @@ def main():
     print("pair validation errors:", static["pair_validation_errors"])
     print("eta_pair_sum:", evolution_data["eta_pair_sum"])
     print("eta by order:", {s: evolution_data["eta"][s] for s in static["s_orders"]})
+    print("pair raw weights:", {s: evolution_data["raw_weights"][s] for s in static["pairable_orders"]})
+    print("tail raw weights:", {s: evolution_data["raw_weights"][s] for s in static["tail_orders"]})
     print("pair theta:", evolution_data["theta"])
     print("pair scale:", evolution_data["pair_scale"])
-    print("raw weights:", evolution_data["raw_weights"])
-    print("debug channel validation (basis-level):", evolution_data["validation_error"])
+    print("debug channel validation (|0...0>, |1...1>):", evolution_data["validation_error"])
 
     rng = np.random.default_rng(seed=args.seed)
 
@@ -624,8 +579,6 @@ def main():
     print("single-step trace distance expectation bias:", single_step_expectation_bias_state)
     print("single-step trace distance sample fluctuation:", single_step_fluctuation)
     print("single-step trace distance after compensation:", single_step_sample_error)
-    print("debug single-step basis error before:", evolution_data["single_step_error_before"])
-    print("debug single-step basis expectation bias:", evolution_data["single_step_expectation_bias"])
 
     def multi_step_channel_sampling(num_trials):
         rho_list = [] if args.save_trials_list else None
@@ -652,9 +605,6 @@ def main():
     print("total trace distance expectation bias:", total_expectation_bias_state)
     print("total trace distance sample fluctuation:", total_sample_fluctuation)
     print("total trace distance after compensation:", total_sample_error)
-    print("debug total basis error before:", evolution_data["uncompensated_total_error"])
-    print("debug total basis expectation bias:", evolution_data["deterministic_bias"])
-
     data_dir = Path("data/no_search")
     data_dir.mkdir(parents=True, exist_ok=True)
     out = data_dir / f"NCC_channel_log_trials{trials}_N{args.N}_r{args.r}_q{q0}_s{s0}.npz"
@@ -668,10 +618,6 @@ def main():
         rho_total_before=rho_total_before,
         rho_total_deterministic=rho_total_deterministic,
         rho_total_average=rho_total_avg,
-        single_step_basis_error_before=evolution_data["single_step_error_before"],
-        single_step_basis_expectation_bias=evolution_data["single_step_expectation_bias"],
-        total_basis_error_before=evolution_data["uncompensated_total_error"],
-        total_basis_expectation_bias=evolution_data["deterministic_bias"],
         validation_error=evolution_data["validation_error"],
         single_step_state_error_before=single_step_error_before_state,
         single_step_state_sample_error=single_step_sample_error,
@@ -693,7 +639,7 @@ def main():
         s0=s0,
         eta_pair_sum=evolution_data["eta_pair_sum"],
         pair_scale=evolution_data["pair_scale"],
-        raw_total=evolution_data["raw_total"],
+        raw_l1_norm_total=evolution_data["raw_l1_norm_total"],
         theta=evolution_data["theta"],
         sin_theta=evolution_data["sin_theta"],
         cos_sq=evolution_data["cos_sq"],

@@ -108,6 +108,43 @@ def build_tilde_V(static, t_total: float, r: int, validation_tol=1e-10):
     }
 
 
+def sample_Pauli_then_compensate_exp(
+    rng: np.random.Generator,
+    static: dict,
+    evolution_data: dict,
+    order: int | None = None,
+    atol: float = 1e-10,
+) -> np.ndarray:
+    """Sample one full compensation component for original-NCC."""
+    if order is None:
+        order = int(rng.choice([2, 3], p=evolution_data["p_s"]))
+    if order == 2:
+        coeffs = static["c1_coeffs"]
+        labels = static["c1_labels"]
+        l1_norm = static["c1_l1"]
+    elif order == 3:
+        coeffs = static["c2_coeffs"]
+        labels = static["c2_labels"]
+        l1_norm = static["c2_l1"]
+    else:
+        raise ValueError(f"unsupported order s={order}")
+    probs = np.abs(coeffs) / l1_norm
+    # Sample one Pauli from the order-s commutator expansion.
+    idx = int(rng.choice(len(labels), p=probs))
+    coeff = coeffs[idx]
+    # With this probability, sample I + eta_sum * (\pm i) * P.
+    sign = coeff / (1j * abs(coeff))
+    W_mat = sign * cached_pauli_matrix_from_label(labels[idx])
+    # For anti-Hermitian F_2 and F_3, the coefficients are purely imaginary,
+    # so the sampled W should be Hermitian.
+    hermitian_err = np.linalg.norm(W_mat - W_mat.conj().T, ord="fro")
+    if hermitian_err > atol:
+        raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
+    # This is the pre-pairing form I + i eta_sum W, i.e. the full compensated
+    # component already including the original-mode normalization convention.
+    return static["identity"] + 1j * evolution_data["eta_sum"] * W_mat
+
+
 def main():
     args = parse_args()
 
@@ -144,35 +181,6 @@ def main():
     print("p_s:", evolution_data["p_s"])
     print("tilde_V compensation-vs-Taylor check:", evolution_data["validation_error"])
 
-    def sample_Pauli_then_compensate_exp(rng, s, atol=1e-10):
-        """Sample a Hermitian Pauli W from order-s commutator data."""
-        if s == 2:
-            coeffs = static["c1_coeffs"]
-            labels = static["c1_labels"]
-            l1_norm = static["c1_l1"]
-        elif s == 3:
-            coeffs = static["c2_coeffs"]
-            labels = static["c2_labels"]
-            l1_norm = static["c2_l1"]
-        else:
-            raise ValueError(f"unsupported order s={s}")
-        probs = np.abs(coeffs) / l1_norm
-        # sample Pauli from the expansion of given F_term
-        idx = int(rng.choice(len(labels), p=probs))
-        coeff = coeffs[idx]
-        # With prob, sample I + eta_sum * (\pm 1j) * pauli, note the sign
-        sign = coeff / (1j * abs(coeff))
-        W_mat = sign * cached_pauli_matrix_from_label(labels[idx])
-        # For antiHermtian F_2 and F_3, the coeffs are purely imaginary, so W is Hermitian.
-        hermitian_err = np.linalg.norm(W_mat - W_mat.conj().T, ord="fro")
-        if hermitian_err > atol:
-            raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
-
-        # apply exp(i theta W), you must multiply total 1-norm \sqrt{1+eta_sum^2}.
-        # numerically we equivalently apply the term before pairing,
-        # which is equivalent to 1-norm * (I + i eta_sum W / 1-norm) = I + i eta_sum W
-        return identity + 1j * evolution_data["eta_sum"] * W_mat
-
     # K = 1, sample from s = 2, 3
     def NCC_sampling(trials):
         rng = np.random.default_rng(seed=7)
@@ -184,7 +192,7 @@ def main():
         V_average = np.zeros_like(identity)
         for _ in tqdm(range(trials), desc="single step trials"):
             s = int(rng.choice(s_list, p=evolution_data["p_s"]))
-            sample = sample_Pauli_then_compensate_exp(rng, s)
+            sample = sample_Pauli_then_compensate_exp(rng, static, evolution_data, order=s)
             V_average += sample
             if V_list is not None:
                 V_list.append(sample)
@@ -217,7 +225,7 @@ def main():
             evolution = identity.copy()
             for _ in range(r):
                 s = int(rng.choice(s_list, p=evolution_data["p_s"]))
-                evolution = sample_Pauli_then_compensate_exp(rng, s) @ S @ evolution
+                evolution = sample_Pauli_then_compensate_exp(rng, static, evolution_data, order=s) @ S @ evolution
 
             U_total_average += evolution
             if U_total_list is not None:

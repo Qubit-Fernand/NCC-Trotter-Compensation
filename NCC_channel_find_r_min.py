@@ -150,6 +150,19 @@ def trace_norm(matrix: np.ndarray) -> float:
     return float(np.sum(np.linalg.svd(matrix, compute_uv=False)))
 
 
+def exact_total_state(mode_impl, evolution_data: dict, rho: np.ndarray) -> np.ndarray:
+    return mode_impl.apply_unitary_channel(evolution_data["U_exact"], rho)
+
+
+def deterministic_total_state(mode_impl, evolution_data: dict, rho: np.ndarray, r: int) -> np.ndarray:
+    out = rho.copy()
+    for _ in range(r):
+        out = evolution_data["apply_tilde_V_expectation"](
+            mode_impl.apply_unitary_channel(evolution_data["S1"], out)
+        )
+    return out
+
+
 def resolve_mode_impl(mode: str):
     if mode == "original":
         return ncc_channel_original
@@ -168,10 +181,10 @@ def estimate_total_sample_error(
     expectation_bias: float,
     mode_impl,
 ):
-    """Estimate sampled total channel error on rho0 for a fixed r."""
-    rho0 = mode_impl.zero_density_matrix(static["n"])
-    rho_exact = evolution_data["apply_exact_total"](rho0)
-    rho_deterministic = evolution_data["apply_compensated_total"](rho0)
+    """Estimate sampled total channel error on |1...1><1...1| for a fixed r."""
+    rho0 = mode_impl.one_density_matrix(static["n"])
+    rho_exact = exact_total_state(mode_impl, evolution_data, rho0)
+    rho_deterministic = deterministic_total_state(mode_impl, evolution_data, rho0, r)
 
     rng = np.random.default_rng(seed)
     rho_average = np.zeros_like(rho0)
@@ -191,7 +204,7 @@ def estimate_total_sample_error(
         "expectation_bias": expectation_bias,
         "eta_pair_sum": float(evolution_data["eta_pair_sum"]),
         "pair_scale": float(evolution_data["pair_scale"]),
-        "raw_total": float(evolution_data["raw_total"]),
+        "raw_l1_norm_total": float(evolution_data["raw_l1_norm_total"]),
     }
 
 
@@ -217,9 +230,9 @@ def search_r_min(
             if metric_key == "expectation_bias":
                 if r not in evolution_cache:
                     evolution_cache[r] = mode_impl.build_tilde_V(static, t_total, r)
-                rho0 = mode_impl.zero_density_matrix(static["n"])
-                rho_exact = evolution_cache[r]["apply_exact_total"](rho0)
-                rho_deterministic = evolution_cache[r]["apply_compensated_total"](rho0)
+                rho0 = mode_impl.one_density_matrix(static["n"])
+                rho_exact = exact_total_state(mode_impl, evolution_cache[r], rho0)
+                rho_deterministic = deterministic_total_state(mode_impl, evolution_cache[r], rho0, r)
                 return {"expectation_bias": trace_norm(rho_deterministic - rho_exact)}
 
             if metric_key == "sample_error":
@@ -229,9 +242,9 @@ def search_r_min(
                 if r not in evolution_cache:
                     evolution_cache[r] = mode_impl.build_tilde_V(static, t_total, r)
                 evolution_data = evolution_cache[r]
-                rho0 = mode_impl.zero_density_matrix(static["n"])
-                rho_exact = evolution_data["apply_exact_total"](rho0)
-                rho_deterministic = evolution_data["apply_compensated_total"](rho0)
+                rho0 = mode_impl.one_density_matrix(static["n"])
+                rho_exact = exact_total_state(mode_impl, evolution_data, rho0)
+                rho_deterministic = deterministic_total_state(mode_impl, evolution_data, rho0, r)
                 result = estimate_total_sample_error(
                     static=static,
                     t_total=t_total,

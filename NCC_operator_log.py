@@ -179,6 +179,46 @@ def build_tilde_V(
     }
 
 
+def sample_Pauli_then_compensate_exp(
+    rng: np.random.Generator,
+    static: dict,
+    evolution_data: dict,
+    order: int | None = None,
+    atol: float = 1e-10,
+) -> np.ndarray:
+    """Sample one full compensation component for log-NCC."""
+    s_orders = static["s_orders"]
+    if order is None:
+        raw_weights = evolution_data["raw_weights"]
+        raw_l1_norm_total = float(sum(raw_weights.values()))
+        p_order = np.array([raw_weights[s] / raw_l1_norm_total for s in s_orders], dtype=float)
+        order = int(rng.choice(s_orders, p=p_order))
+
+    f_term = static["F_terms"][order]
+    labels = f_term["labels"]
+    probs = np.abs(f_term["coeffs"]) / f_term["l1_norm"]
+    # Sample one Pauli from the expansion of the chosen F_term.
+    idx = int(rng.choice(len(labels), p=probs))
+    coeff = f_term["coeffs"][idx]
+    pauli = cached_pauli_matrix_from_label(labels[idx])
+    raw_l1_norm_total = float(sum(evolution_data["raw_weights"].values()))
+    if f_term["kind"] == "pair":
+        phase = coeff / (1j * abs(coeff))
+        W_mat = phase * pauli
+        hermitian_err = np.linalg.norm(W_mat - W_mat.conj().T, ord="fro")
+        if hermitian_err > atol:
+            raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
+        # Pairable terms use the normalized paired component and then multiply by
+        # the mixed raw-weight sum.
+        return raw_l1_norm_total * (
+            (static["identity"] + 1j * evolution_data["eta_pair_sum"] * W_mat)
+            / evolution_data["pair_scale"]
+        )
+    # Non-pairable terms are sampled directly as the signed Pauli component,
+    # again scaled by the total mixed raw weight.
+    return raw_l1_norm_total * (coeff / abs(coeff) * pauli)
+
+
 def main():
     args = parse_args()
     n = args.N
@@ -236,8 +276,8 @@ def main():
     V_exact = expm(-1j * (A_mat + B_mat) * t) @ expm(1j * A_mat * t) @ expm(1j * B_mat * t)
 
     print("Phi extraction method:", "direct BCH commutator formula")
-    raw_total = float(sum(raw_weights.values()))
-    p_order = np.array([raw_weights[s] / raw_total for s in s_orders], dtype=float)
+    raw_l1_norm_total = float(sum(raw_weights.values()))
+    p_order = np.array([raw_weights[s] / raw_l1_norm_total for s in s_orders], dtype=float)
 
     print("eta_pair_sum:", eta_pair_sum)
     print("eta by order:", {s: eta[s] for s in s_orders})
@@ -250,34 +290,12 @@ def main():
 
     rng = np.random.default_rng(seed=7)
 
-    def sample_Pauli_then_compensate_exp(order, atol=1e-10):
-        """Sample one full compensation component, including the raw-weight sum."""
-        F_term = F_terms[order]
-        labels = F_term["labels"]
-        probs = np.abs(F_term["coeffs"]) / F_term["l1_norm"]
-        # sample Pauli from the expansion of given F_term
-        idx = int(rng.choice(len(labels), p=probs))
-        coeff = F_term["coeffs"][idx]
-        pauli = cached_pauli_matrix_from_label(labels[idx])
-        if F_term["kind"] == "pair":
-            phase = coeff / (1j * abs(coeff))
-            W_mat = phase * pauli
-            hermitian_err = np.linalg.norm(W_mat - W_mat.conj().T, ord="fro")
-            if hermitian_err > atol:
-                raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
-
-            # apply exp(i theta W), you must multiply total 1-norm raw_total.
-            return raw_total * ((identity + 1j * eta_pair_sum * W_mat) / evolution_data["pair_scale"])
-        # apply W like (1+i)X, you must multiply total 1-norm raw_total.
-        return raw_total * (coeff / abs(coeff) * pauli)
-
-    # Sampling start here
     def NCC_sampling(num_trials):
         V_list = [] if args.save_trials_list else None
         v_average = np.zeros_like(identity)
         for _ in tqdm(range(num_trials), desc="single step trials"):
             order = int(rng.choice(s_orders, p=p_order))
-            sample = sample_Pauli_then_compensate_exp(order)
+            sample = sample_Pauli_then_compensate_exp(rng, static, evolution_data, order=order)
             v_average += sample
             if V_list is not None:
                 V_list.append(sample)
@@ -303,7 +321,7 @@ def main():
             evo = np.eye(2**n, dtype=complex)
             for _ in range(r):
                 order = int(rng.choice(s_orders, p=p_order))
-                evo = sample_Pauli_then_compensate_exp(order) @ S1 @ evo
+                evo = sample_Pauli_then_compensate_exp(rng, static, evolution_data, order=order) @ S1 @ evo
             U_total_average += evo
             if U_total_list is not None:
                 U_total_list.append(evo)
@@ -355,7 +373,7 @@ def main():
         q0=q0,
         s0=s0,
         eta_sum=eta_pair_sum,
-        raw_total=raw_total,
+        raw_l1_norm_total=raw_l1_norm_total,
         cond_bch_truncation=cond_bch_truncation,
         cond_finite_s_truncation=cond_finite_s_truncation,
         save_trials_list=args.save_trials_list,

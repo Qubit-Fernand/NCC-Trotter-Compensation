@@ -8,7 +8,6 @@ from tqdm import tqdm
 
 import NCC_operator_log as ncc_log
 import NCC_operator_original as ncc_original
-from Pauli_Hamiltonian_BCH import cached_pauli_matrix_from_label
 
 
 def build_parser():
@@ -183,37 +182,7 @@ def save_sampling_checkpoint(output_path: Path, payload: dict):
     )
 
 
-def sample_original_pauli_then_compensate_exp(
-    rng: np.random.Generator,
-    static: dict,
-    p_s: np.ndarray,
-    eta_sum: float,
-    atol: float = 1e-10,
-) -> np.ndarray:
-    """Sample one compensated Pauli term for original-NCC."""
-    order = int(rng.choice([2, 3], p=p_s))
-    if order == 2:
-        coeffs = static["c1_coeffs"]
-        labels = static["c1_labels"]
-        l1_norm = static["c1_l1"]
-    elif order == 3:
-        coeffs = static["c2_coeffs"]
-        labels = static["c2_labels"]
-        l1_norm = static["c2_l1"]
-    else:
-        raise ValueError(f"unsupported sampled order={order}")
-    probs = np.abs(coeffs) / l1_norm
-    idx = int(rng.choice(len(labels), p=probs))
-    coeff = coeffs[idx]
-    sign = coeff / (1j * abs(coeff))
-    w_mat = sign * cached_pauli_matrix_from_label(labels[idx])
-    hermitian_err = np.linalg.norm(w_mat - w_mat.conj().T, ord="fro")
-    if hermitian_err > atol:
-        raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
-    return static["identity"] + 1j * eta_sum * w_mat
-
-
-def estimate_total_sample_error_original(
+def estimate_total_sample_error(
     static: dict,
     t_total: float,
     r: int,
@@ -221,103 +190,22 @@ def estimate_total_sample_error_original(
     seed: int,
     evolution_data: dict,
     expectation_bias: float,
+    mode_impl,
 ):
-    """Estimate sampled total error for original-NCC."""
+    """Estimate sampled total error for the selected operator NCC mode."""
     del t_total
+
     rng = np.random.default_rng(seed)
     u_total_average = np.zeros_like(static["identity"])
     for _ in tqdm(range(trials), desc=f"r={r}", leave=False):
         evo = static["identity"].copy()
         for _ in range(r):
-            evo = (
-                sample_original_pauli_then_compensate_exp(
-                    rng,
-                    static,
-                    evolution_data["p_s"],
-                    evolution_data["eta_sum"],
-                )
-                @ evolution_data["S1"]
-                @ evo
-            )
+            evo = mode_impl.sample_Pauli_then_compensate_exp(rng, static, evolution_data) @ evolution_data["S1"] @ evo
         u_total_average += evo
     u_total_average /= trials
     return {
         "sample_error": float(np.linalg.norm(u_total_average - evolution_data["U_exact"], 2)),
         "sample_fluctuation": float(np.linalg.norm(u_total_average - evolution_data["deterministic"], 2)),
-        "expectation_bias": expectation_bias,
-    }
-
-
-def sample_log_pauli_then_compensate_exp(
-    rng: np.random.Generator,
-    identity: np.ndarray,
-    f_terms: dict,
-    order: int,
-    eta_pair_sum: float,
-    pair_scale: float,
-    raw_total: float,
-    atol: float = 1e-10,
-):
-    """Sample one compensated Pauli term for log-NCC."""
-    data = f_terms[order]
-    labels = data["labels"]
-    probs = np.abs(data["coeffs"]) / data["l1_norm"]
-    idx = int(rng.choice(len(labels), p=probs))
-    coeff = data["coeffs"][idx]
-    pauli = cached_pauli_matrix_from_label(labels[idx])
-    if data["kind"] == "pair":
-        phase = coeff / (1j * abs(coeff))
-        w_mat = phase * pauli
-        hermitian_err = np.linalg.norm(w_mat - w_mat.conj().T, ord="fro")
-        if hermitian_err > atol:
-            raise ValueError(f"sampled W is not Hermitian (herm_err={hermitian_err:.3e})")
-        return raw_total * ((identity + 1j * eta_pair_sum * w_mat) / pair_scale)
-    return raw_total * (coeff / abs(coeff) * pauli)
-
-
-def estimate_total_sample_error_log(
-    static: dict,
-    t_total: float,
-    r: int,
-    trials: int,
-    seed: int,
-    evolution_data: dict,
-    expectation_bias: float,
-):
-    """Estimate sampled total error for log-NCC."""
-    del t_total
-    s_orders = static["s_orders"]
-    f_terms = static["F_terms"]
-    identity = static["identity"]
-    raw_weights = evolution_data["raw_weights"]
-    raw_total = float(sum(raw_weights.values()))
-    p_order = np.array([raw_weights[s] / raw_total for s in s_orders], dtype=float)
-
-    rng = np.random.default_rng(seed)
-    u_total_average = np.zeros_like(identity)
-    for _ in tqdm(range(trials), desc=f"r={r}", leave=False):
-        evo = identity.copy()
-        for _ in range(r):
-            order = int(rng.choice(s_orders, p=p_order))
-            evo = (
-                sample_log_pauli_then_compensate_exp(
-                    rng,
-                    identity,
-                    f_terms,
-                    order,
-                    evolution_data["eta_pair_sum"],
-                    evolution_data["pair_scale"],
-                    raw_total,
-                )
-                @ evolution_data["S1"]
-                @ evo
-            )
-        u_total_average += evo
-    u_total_average /= trials
-    deterministic = np.linalg.matrix_power(evolution_data["tilde_V"] @ evolution_data["S1"], r)
-    return {
-        "sample_error": float(np.linalg.norm(u_total_average - evolution_data["U_exact"], 2)),
-        "sample_fluctuation": float(np.linalg.norm(u_total_average - deterministic, 2)),
         "expectation_bias": expectation_bias,
     }
 
@@ -333,8 +221,7 @@ def build_mode_config(args):
             "static": static,
             "q0": q0,
             "s0": s0,
-            "build_tilde_V": ncc_log.build_tilde_V,
-            "estimate_total_sample_error": estimate_total_sample_error_log,
+            "mode_impl": ncc_log,
         }
 
     static = ncc_original.build_static_data(args.N, args.J, args.h)
@@ -342,15 +229,13 @@ def build_mode_config(args):
         "static": static,
         "q0": None,
         "s0": None,
-        "build_tilde_V": ncc_original.build_tilde_V,
-        "estimate_total_sample_error": estimate_total_sample_error_original,
+        "mode_impl": ncc_original,
     }
 
 
 def search_r_min(
     static: dict,
-    build_tilde_V_fn,
-    estimate_total_sample_error_fn,
+    mode_impl,
     evolution_cache: dict[int, dict],
     t_total: float,
     epsilon: float,
@@ -367,7 +252,7 @@ def search_r_min(
     def search_min_by(metric_key: str) -> tuple[int, dict]:
         def evaluate_at_r(r: int) -> dict:
             if r not in evolution_cache:
-                evolution_cache[r] = build_tilde_V_fn(static, t_total, r)
+                evolution_cache[r] = mode_impl.build_tilde_V(static, t_total, r)
 
             if metric_key == "expectation_bias":
                 return {"expectation_bias": evolution_cache[r]["deterministic_bias"]}
@@ -377,7 +262,7 @@ def search_r_min(
                     return result_cache[r]
                 seed = make_search_seed(base_seed, repetition, r)
                 evolution_data = evolution_cache[r]
-                result = estimate_total_sample_error_fn(
+                result = estimate_total_sample_error(
                     static=static,
                     t_total=t_total,
                     r=r,
@@ -385,6 +270,7 @@ def search_r_min(
                     seed=seed,
                     evolution_data=evolution_data,
                     expectation_bias=evolution_data["deterministic_bias"],
+                    mode_impl=mode_impl,
                 )
                 result["seed"] = seed
                 result_cache[r] = result
@@ -469,8 +355,7 @@ def run_case(args, case_index: int | None = None, total_cases: int | None = None
         label = f"[{args.mode} repeat {repetition + 1}/{args.repeats}]"
         sampled_r_min, metrics, expected_r_min = search_r_min(
             static=config["static"],
-            build_tilde_V_fn=config["build_tilde_V"],
-            estimate_total_sample_error_fn=config["estimate_total_sample_error"],
+            mode_impl=config["mode_impl"],
             evolution_cache=evolution_cache,
             t_total=args.T,
             epsilon=args.epsilon,
