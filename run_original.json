@@ -46,12 +46,6 @@
       "mode": "original",
       "N": 8,
       "T": 2.0,
-      "epsilon": 0.001
-    },
-    {
-      "mode": "original",
-      "N": 8,
-      "T": 2.0,
       "epsilon": 0.0025
     },
     {
