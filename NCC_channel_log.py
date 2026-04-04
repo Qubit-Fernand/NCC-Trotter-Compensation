@@ -378,7 +378,10 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
             raw_weights[order] = pair_scale * eta[order] / eta_pair_sum
     for order in tail_orders:
         # 2^j compared to eta because each ad_{Phi_q} layer is sampled as either +exp(+i pi/4 ad_P) or -exp(-i pi/4 ad_P).
-        raw_weights[order] = F_terms[order]["sampling_l1_norm"]
+        # Tail orders must still carry the step-size scaling t^s.
+        # Compared with eta_s, sampling_l1_norm includes the extra 2^j split
+        # from sampling each ad_{iP} layer by two unitary branches.
+        raw_weights[order] = F_terms[order]["sampling_l1_norm"] * (t**order)
     raw_l1_norm_total = float(sum(raw_weights.values()))
     p_order = np.array([raw_weights[order] / raw_l1_norm_total for order in s_orders], dtype=float)
 
