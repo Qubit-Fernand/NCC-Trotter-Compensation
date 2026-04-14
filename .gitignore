@@ -25,3 +25,5 @@ data_Ising/
 
 logs/
 .claude/
+.venv/
+.codex
