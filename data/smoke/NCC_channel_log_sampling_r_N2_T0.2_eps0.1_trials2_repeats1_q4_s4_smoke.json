@@ -10,7 +10,7 @@
     "trials": 2,
     "repeats": 1,
     "base_seed": 7,
-    "r_max": 1024,
+    "r_max": 8,
     "s0": 4,
     "q0": 4
   },
@@ -21,13 +21,13 @@
     1
   ],
   "sample_errors": [
-    0.047812739636107784
+    0.04780972918133547
   ],
   "expectation_biases": [
-    7.815073707771749e-16
+    0.0005669018124772267
   ],
   "sample_fluctuations": [
-    0.04781273963610792
+    0.04780972918133554
   ],
   "ci_low_history": [
     3.0
@@ -39,45 +39,45 @@
     {
       "repetition": 0,
       "r": 1,
-      "sample_error": 0.4404285520248323,
-      "sample_fluctuation": 0.44042855202483244,
-      "expectation_bias": 2.2425096881923055e-16,
+      "sample_error": 0.44042855202483233,
+      "sample_fluctuation": 0.44042855202483233,
+      "expectation_bias": 0.05814946052907906,
       "eta_pair_sum": 0.30933333333333335,
       "pair_scale": 1.1759032462088215,
-      "raw_total": 1.350836579542155,
+      "raw_l1_norm_total": 1.350836579542155,
       "seed": 1016
     },
     {
       "repetition": 0,
       "r": 2,
-      "sample_error": 1.0000000000000004,
+      "sample_error": 1.0000000000000002,
       "sample_fluctuation": 1.0,
-      "expectation_bias": 2.2453077946362614e-16,
+      "expectation_bias": 0.0030083066988818735,
       "eta_pair_sum": 0.05866666666666667,
       "pair_scale": 1.006860025580076,
-      "raw_total": 1.0177933589134092,
+      "raw_l1_norm_total": 1.0177933589134092,
       "seed": 2025
     },
     {
       "repetition": 0,
       "r": 4,
-      "sample_error": 0.0056946116201639025,
-      "sample_fluctuation": 0.005694611620164785,
-      "expectation_bias": 1.7765923561571954e-15,
+      "sample_error": 0.023922945302474463,
+      "sample_fluctuation": 0.024052074641604193,
+      "expectation_bias": 0.00017563081716316995,
       "eta_pair_sum": 0.012333333333333335,
       "pair_scale": 1.0003041759607147,
-      "raw_total": 1.0009875092940481,
+      "raw_l1_norm_total": 1.0009875092940481,
       "seed": 4043
     },
     {
       "repetition": 0,
       "r": 3,
-      "sample_error": 0.047812739636107784,
-      "sample_fluctuation": 0.04781273963610792,
-      "expectation_bias": 7.815073707771749e-16,
+      "sample_error": 0.04780972918133547,
+      "sample_fluctuation": 0.04780972918133554,
+      "expectation_bias": 0.0005669018124772267,
       "eta_pair_sum": 0.02330864197530864,
       "pair_scale": 1.0010859958879321,
-      "raw_total": 1.003245666669825,
+      "raw_l1_norm_total": 1.003245666669825,
       "seed": 3034
     }
   ]

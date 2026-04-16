@@ -37,25 +37,20 @@ def parse_args():
     return parser.parse_args()
 
 
-def zero_density_matrix(num_qubits: int) -> np.ndarray:
-    """Return |0...0><0...0|."""
+def computational_basis_density_matrices(num_qubits: int) -> tuple[np.ndarray, list[str]]:
+    """Return all computational-basis pure states as density matrices."""
     dim = 2**num_qubits
-    rho = np.zeros((dim, dim), dtype=complex)
-    rho[0, 0] = 1.0
-    return rho
+    basis_states = np.zeros((dim, dim, dim), dtype=complex)
+    labels = []
+    for idx in range(dim):
+        basis_states[idx, idx, idx] = 1.0
+        labels.append(format(idx, f"0{num_qubits}b"))
+    return basis_states, labels
 
 
-def one_density_matrix(num_qubits: int) -> np.ndarray:
-    """Return |1...1><1...1|."""
-    dim = 2**num_qubits
-    rho = np.zeros((dim, dim), dtype=complex)
-    rho[-1, -1] = 1.0
-    return rho
-
-
-def apply_unitary_channel(unitary: np.ndarray, rho: np.ndarray) -> np.ndarray:
-    """Apply rho -> U rho U^dagger."""
-    return unitary @ rho @ unitary.conj().T
+def apply_unitary_channel(unitary: np.ndarray, rho: np.ndarray, sign: complex = 1.0 + 0.0j) -> np.ndarray:
+    """Apply rho -> sign * U rho U^dagger."""
+    return sign * (unitary @ rho @ unitary.conj().T)
 
 
 def apply_ad_commutator(operator: np.ndarray, rho: np.ndarray) -> np.ndarray:
@@ -66,6 +61,19 @@ def apply_ad_commutator(operator: np.ndarray, rho: np.ndarray) -> np.ndarray:
 def trace_norm(matrix: np.ndarray) -> float:
     """Return the trace norm (Schatten-1 norm) of a matrix."""
     return float(np.sum(np.linalg.svd(matrix, compute_uv=False)))
+
+
+def apply_signed_unitary_channel_to_basis_states(sign: complex, unitary: np.ndarray) -> np.ndarray:
+    """Apply a signed unitary channel to all computational-basis pure states at once."""
+    columns = unitary.T.copy()
+    return sign * np.einsum("ai,bi->iab", columns, columns.conj(), optimize=True)
+
+
+def max_trace_norm_error(states_a: np.ndarray, states_b: np.ndarray) -> tuple[float, int, np.ndarray]:
+    """Return the maximum trace-norm error over two state batches."""
+    errors = np.array([trace_norm(a - b) for a, b in zip(states_a, states_b)], dtype=float)
+    worst_index = int(np.argmax(errors))
+    return float(errors[worst_index]), worst_index, errors
 
 
 def paired_channel_parameters(eta_pair_sum: float) -> dict:
@@ -197,7 +205,7 @@ def build_tilde_V(static: dict, t_total: float, r: int, validation_tol=1e-10):
                 out += raw_weights[order] * Pauli["prob"] * (rho + eta_pair_sum * apply_ad_commutator(1j * Pauli["W_mat"], rho)) / pair_scale
         return out
 
-    validation_states = (zero_density_matrix(static["n"]), one_density_matrix(static["n"]))
+    validation_states, _ = computational_basis_density_matrices(static["n"])
     validation_error = max(trace_norm(apply_tilde_V_expectation(rho) - apply_tilde_V_taylor(rho)) for rho in validation_states)
     if validation_error > validation_tol:
         raise ValueError(f"channel tilde_V mismatch between compensation expectation and Taylor action: {validation_error:.3e}")
@@ -222,26 +230,48 @@ def build_tilde_V(static: dict, t_total: float, r: int, validation_tol=1e-10):
     }
 
 
-def sample_channel_then_compensate(
+def sample_channel_then_compensate_descriptor(
     rng: np.random.Generator,
     static: dict,
     evolution_data: dict,
     order: int,
-    rho: np.ndarray,
-) -> np.ndarray:
-    """Sample one original compensated remainder channel and apply it to rho."""
+) -> tuple[complex, np.ndarray]:
+    """Sample one original compensated remainder channel as a signed unitary descriptor."""
     del static
     Paulis = evolution_data["pair_data"][order]
     probs = np.array([Pauli["prob"] for Pauli in Paulis], dtype=float)
     idx = int(rng.choice(len(Paulis), p=probs))
     Pauli = Paulis[idx]
     if rng.random() < evolution_data["unitary_branch_prob"]:
-        # Positive channel branch: U_theta rho U_theta^\dagger.
-        out = apply_unitary_channel(Pauli["paired_unitary"], rho)
-    else:
-        # Negative branch: - P rho P.
-        out = -(Pauli["W_mat"] @ rho @ Pauli["W_mat"])
-    return evolution_data["raw_l1_norm_total"] * out
+        return evolution_data["raw_l1_norm_total"], Pauli["paired_unitary"]
+    return -evolution_data["raw_l1_norm_total"], Pauli["W_mat"]
+
+
+def sample_trotter_step_descriptor(
+    rng: np.random.Generator,
+    static: dict,
+    evolution_data: dict,
+) -> tuple[complex, np.ndarray]:
+    """Sample one full compensated Trotter step as a signed unitary descriptor."""
+    order = int(rng.choice((2, 3), p=evolution_data["p_order"]))
+    sign, unitary = sample_channel_then_compensate_descriptor(rng, static, evolution_data, order)
+    return sign, unitary @ evolution_data["S1"]
+
+
+def sample_trajectory_descriptor(
+    rng: np.random.Generator,
+    static: dict,
+    evolution_data: dict,
+    num_steps: int,
+) -> tuple[complex, np.ndarray]:
+    """Sample a multi-step trajectory and compress it into one signed unitary descriptor."""
+    sign = 1.0 + 0.0j
+    unitary = np.eye(static["dim"], dtype=complex)
+    for _ in range(num_steps):
+        step_sign, step_unitary = sample_trotter_step_descriptor(rng, static, evolution_data)
+        sign *= step_sign
+        unitary = step_unitary @ unitary
+    return sign, unitary
 
 
 def main():
@@ -256,17 +286,38 @@ def main():
     static = build_static_data(n=n, j=j, h=h)
     evolution_data = build_tilde_V(static, t_total, r)
 
-    rho0 = one_density_matrix(n)
-    rho_single_exact = apply_unitary_channel(evolution_data["step_exact"], rho0)
-    rho_single_before = apply_unitary_channel(evolution_data["S1"], rho0)
-    rho_single_deterministic = evolution_data["apply_tilde_V_expectation"](rho_single_before)
+    basis_states, basis_labels = computational_basis_density_matrices(n)
+    rho_single_exact = np.array(
+        [apply_unitary_channel(evolution_data["step_exact"], rho) for rho in basis_states],
+        dtype=complex,
+    )
+    rho_single_before = np.array(
+        [apply_unitary_channel(evolution_data["S1"], rho) for rho in basis_states],
+        dtype=complex,
+    )
+    rho_single_deterministic = np.array(
+        [evolution_data["apply_tilde_V_expectation"](rho) for rho in rho_single_before],
+        dtype=complex,
+    )
 
-    rho_total_exact = apply_unitary_channel(evolution_data["U_exact"], rho0)
-    rho_total_before = rho0.copy()
-    rho_total_deterministic = rho0.copy()
+    rho_total_exact = np.array(
+        [apply_unitary_channel(evolution_data["U_exact"], rho) for rho in basis_states],
+        dtype=complex,
+    )
+    rho_total_before = basis_states.copy()
+    rho_total_deterministic = basis_states.copy()
     for _ in range(r):
-        rho_total_before = apply_unitary_channel(evolution_data["S1"], rho_total_before)
-        rho_total_deterministic = evolution_data["apply_tilde_V_expectation"](apply_unitary_channel(evolution_data["S1"], rho_total_deterministic))
+        rho_total_before = np.array(
+            [apply_unitary_channel(evolution_data["S1"], rho) for rho in rho_total_before],
+            dtype=complex,
+        )
+        rho_total_deterministic = np.array(
+            [
+                evolution_data["apply_tilde_V_expectation"](apply_unitary_channel(evolution_data["S1"], rho))
+                for rho in rho_total_deterministic
+            ],
+            dtype=complex,
+        )
 
     print("action-on-rho original channel prototype:", True)
     print("N:", n, "r:", r)
@@ -276,17 +327,16 @@ def main():
     print("pair theta:", evolution_data["theta"])
     print("pair scale:", evolution_data["pair_scale"])
     print("raw weights:", evolution_data["raw_weights"])
-    print("debug channel validation (|0...0>, |1...1>):", evolution_data["validation_error"])
+    print("debug channel validation (all computational-basis states):", evolution_data["validation_error"])
 
     rng = np.random.default_rng(seed=args.seed)
 
     def single_step_channel_sampling(num_trials):
         rho_list = [] if args.save_trials_list else None
-        average = np.zeros_like(rho0)
+        average = np.zeros_like(rho_single_exact)
         for _ in tqdm(range(num_trials), desc="single-step channel trials"):
-            rho_after_trotter = apply_unitary_channel(evolution_data["S1"], rho0)
-            order = int(rng.choice((2, 3), p=evolution_data["p_order"]))
-            sample = sample_channel_then_compensate(rng, static, evolution_data, order, rho_after_trotter)
+            sign, unitary = sample_trotter_step_descriptor(rng, static, evolution_data)
+            sample = apply_signed_unitary_channel_to_basis_states(sign, unitary)
             average += sample
             if rho_list is not None:
                 rho_list.append(sample)
@@ -294,25 +344,22 @@ def main():
         return rho_list, average
 
     rho_single_list, rho_single_avg = single_step_channel_sampling(trials)
-    single_step_sample_error = trace_norm(rho_single_avg - rho_single_exact)
-    single_step_fluctuation = trace_norm(rho_single_avg - rho_single_deterministic)
-    single_step_error_before_state = trace_norm(rho_single_before - rho_single_exact)
-    single_step_expectation_bias_state = trace_norm(rho_single_deterministic - rho_single_exact)
+    single_step_sample_error, single_step_sample_argmax, single_step_sample_errors = max_trace_norm_error(rho_single_avg, rho_single_exact)
+    single_step_fluctuation, single_step_fluctuation_argmax, single_step_fluctuations = max_trace_norm_error(rho_single_avg, rho_single_deterministic)
+    single_step_error_before_state, single_step_before_argmax, single_step_before_errors = max_trace_norm_error(rho_single_before, rho_single_exact)
+    single_step_expectation_bias_state, single_step_bias_argmax, single_step_bias_errors = max_trace_norm_error(rho_single_deterministic, rho_single_exact)
 
-    print("single-step trace distance before:", single_step_error_before_state)
-    print("single-step trace distance expectation bias:", single_step_expectation_bias_state)
-    print("single-step trace distance sample fluctuation:", single_step_fluctuation)
-    print("single-step trace distance after compensation:", single_step_sample_error)
+    print("single-step max trace distance before:", 0.5 * single_step_error_before_state, "at", basis_labels[single_step_before_argmax])
+    print("single-step max trace distance expectation bias:", 0.5 * single_step_expectation_bias_state, "at", basis_labels[single_step_bias_argmax])
+    print("single-step max trace distance sample fluctuation:", 0.5 * single_step_fluctuation, "at", basis_labels[single_step_fluctuation_argmax])
+    print("single-step max trace distance after compensation:", 0.5 * single_step_sample_error, "at", basis_labels[single_step_sample_argmax])
 
     def multi_step_channel_sampling(num_trials):
         rho_list = [] if args.save_trials_list else None
-        average = np.zeros_like(rho0)
+        average = np.zeros_like(rho_total_exact)
         for _ in tqdm(range(num_trials), desc="multi-step channel trials"):
-            rho = rho0.copy()
-            for _ in range(r):
-                rho_after_trotter = apply_unitary_channel(evolution_data["S1"], rho)
-                order = int(rng.choice((2, 3), p=evolution_data["p_order"]))
-                rho = sample_channel_then_compensate(rng, static, evolution_data, order, rho_after_trotter)
+            sign, unitary = sample_trajectory_descriptor(rng, static, evolution_data, r)
+            rho = apply_signed_unitary_channel_to_basis_states(sign, unitary)
             average += rho
             if rho_list is not None:
                 rho_list.append(rho)
@@ -320,37 +367,45 @@ def main():
         return rho_list, average
 
     rho_total_list, rho_total_avg = multi_step_channel_sampling(trials)
-    total_sample_error = trace_norm(rho_total_avg - rho_total_exact)
-    total_sample_fluctuation = trace_norm(rho_total_avg - rho_total_deterministic)
-    total_error_before_state = trace_norm(rho_total_before - rho_total_exact)
-    total_expectation_bias_state = trace_norm(rho_total_deterministic - rho_total_exact)
+    total_sample_error, total_sample_argmax, total_sample_errors = max_trace_norm_error(rho_total_avg, rho_total_exact)
+    total_sample_fluctuation, total_fluctuation_argmax, total_sample_fluctuations = max_trace_norm_error(rho_total_avg, rho_total_deterministic)
+    total_error_before_state, total_before_argmax, total_before_errors = max_trace_norm_error(rho_total_before, rho_total_exact)
+    total_expectation_bias_state, total_bias_argmax, total_bias_errors = max_trace_norm_error(rho_total_deterministic, rho_total_exact)
 
-    print("total trace distance before:", total_error_before_state)
-    print("total trace distance expectation bias:", total_expectation_bias_state)
-    print("total trace distance sample fluctuation:", total_sample_fluctuation)
-    print("total trace distance after compensation:", total_sample_error)
+    print("total max trace distance before:", 0.5 * total_error_before_state, "at", basis_labels[total_before_argmax])
+    print("total max trace distance expectation bias:", 0.5 * total_expectation_bias_state, "at", basis_labels[total_bias_argmax])
+    print("total max trace distance sample fluctuation:", 0.5 * total_sample_fluctuation, "at", basis_labels[total_fluctuation_argmax])
+    print("total max trace distance after compensation:", 0.5 * total_sample_error, "at", basis_labels[total_sample_argmax])
     data_dir = Path("data/no_search")
     data_dir.mkdir(parents=True, exist_ok=True)
     out = data_dir / f"NCC_channel_original_trials{trials}_N{args.N}_r{args.r}.npz"
     output_payload = dict(
-        rho0=rho0,
-        rho_single_exact=rho_single_exact,
-        rho_single_before=rho_single_before,
-        rho_single_deterministic=rho_single_deterministic,
-        rho_single_average=rho_single_avg,
-        rho_total_exact=rho_total_exact,
-        rho_total_before=rho_total_before,
-        rho_total_deterministic=rho_total_deterministic,
-        rho_total_average=rho_total_avg,
+        basis_labels=np.array(basis_labels),
         validation_error=evolution_data["validation_error"],
         single_step_state_error_before=single_step_error_before_state,
         single_step_state_sample_error=single_step_sample_error,
         single_step_state_fluctuation=single_step_fluctuation,
         single_step_state_expectation_bias=single_step_expectation_bias_state,
+        single_step_state_error_before_state_index=single_step_before_argmax,
+        single_step_state_sample_error_state_index=single_step_sample_argmax,
+        single_step_state_fluctuation_state_index=single_step_fluctuation_argmax,
+        single_step_state_expectation_bias_state_index=single_step_bias_argmax,
+        single_step_state_error_before_all=single_step_before_errors,
+        single_step_state_sample_error_all=single_step_sample_errors,
+        single_step_state_fluctuation_all=single_step_fluctuations,
+        single_step_state_expectation_bias_all=single_step_bias_errors,
         total_state_error_before=total_error_before_state,
         total_state_sample_error=total_sample_error,
         total_state_fluctuation=total_sample_fluctuation,
         total_state_expectation_bias=total_expectation_bias_state,
+        total_state_error_before_state_index=total_before_argmax,
+        total_state_sample_error_state_index=total_sample_argmax,
+        total_state_fluctuation_state_index=total_fluctuation_argmax,
+        total_state_expectation_bias_state_index=total_bias_argmax,
+        total_state_error_before_all=total_before_errors,
+        total_state_sample_error_all=total_sample_errors,
+        total_state_fluctuation_all=total_sample_fluctuations,
+        total_state_expectation_bias_all=total_bias_errors,
         N=n,
         J=j,
         h=h,
@@ -366,9 +421,6 @@ def main():
         cos_sq=evolution_data["cos_sq"],
         save_trials_list=args.save_trials_list,
     )
-    if args.save_trials_list:
-        output_payload["rho_single_list"] = np.stack(rho_single_list)
-        output_payload["rho_total_list"] = np.stack(rho_total_list)
     np.savez(out, **output_payload)
     print("saving results to:", out)
 

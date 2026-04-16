@@ -1,3 +1,8 @@
+"""
+Too small r cause large step t, the BCH not convergent,
+tilde_V is far from unitary, norm maybe very large.
+"""
+
 import argparse
 import json
 import math

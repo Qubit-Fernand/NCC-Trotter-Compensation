@@ -1,3 +1,8 @@
+"""
+Too small r cause large step t, the BCH not convergent,
+tilde_V is far from unitary, norm maybe very large.
+"""
+
 import argparse
 import json
 import math
@@ -189,17 +194,53 @@ def trace_norm(matrix: np.ndarray) -> float:
     return float(np.sum(np.linalg.svd(matrix, compute_uv=False)))
 
 
-def exact_total_state(mode_impl, evolution_data: dict, rho: np.ndarray) -> np.ndarray:
-    return mode_impl.apply_unitary_channel(evolution_data["U_exact"], rho)
+def exact_total_states(mode_impl, evolution_data: dict, basis_states: np.ndarray) -> np.ndarray:
+    return np.array(
+        [mode_impl.apply_unitary_channel(evolution_data["U_exact"], rho) for rho in basis_states],
+        dtype=complex,
+    )
 
 
-def deterministic_total_state(mode_impl, evolution_data: dict, rho: np.ndarray, r: int) -> np.ndarray:
-    out = rho.copy()
+def deterministic_total_states(mode_impl, evolution_data: dict, basis_states: np.ndarray, r: int) -> np.ndarray:
+    out = basis_states.copy()
     for _ in range(r):
-        out = evolution_data["apply_tilde_V_expectation"](
-            mode_impl.apply_unitary_channel(evolution_data["S1"], out)
+        out = np.array(
+            [evolution_data["apply_tilde_V_expectation"](mode_impl.apply_unitary_channel(evolution_data["S1"], rho)) for rho in out],
+            dtype=complex,
         )
     return out
+
+
+def max_trace_norm_error(states_a: np.ndarray, states_b: np.ndarray, threshold: float | None = None) -> tuple[float, int]:
+    """Return the maximum trace-norm error over two state batches, with optional early exit."""
+    max_error = 0.0
+    worst_index = 0
+    for idx, (state_a, state_b) in enumerate(zip(states_a, states_b)):
+        error = trace_norm(state_a - state_b)
+        if error > max_error:
+            max_error = error
+            worst_index = idx
+        # During r_min search, one violating basis state is enough to reject this r.
+        if threshold is not None and error > threshold:
+            return float(error), idx  # exit
+    return float(max_error), worst_index
+
+
+def ensure_basis_batches(mode_impl, static: dict, evolution_data: dict, r: int) -> tuple[np.ndarray, np.ndarray]:
+    if "basis_states" not in evolution_data:
+        basis_states, basis_labels = mode_impl.computational_basis_density_matrices(static["n"])
+        evolution_data["basis_states"] = basis_states
+        evolution_data["basis_labels"] = np.array(basis_labels)
+    if "basis_exact" not in evolution_data:
+        evolution_data["basis_exact"] = exact_total_states(mode_impl, evolution_data, evolution_data["basis_states"])
+    if "basis_deterministic" not in evolution_data:
+        evolution_data["basis_deterministic"] = deterministic_total_states(
+            mode_impl,
+            evolution_data,
+            evolution_data["basis_states"],
+            r,
+        )
+    return evolution_data["basis_exact"], evolution_data["basis_deterministic"]
 
 
 def resolve_mode_impl(mode: str):
@@ -220,26 +261,22 @@ def estimate_total_sample_error(
     expectation_bias: float,
     mode_impl,
 ):
-    """Estimate sampled total channel error on |1...1><1...1| for a fixed r."""
-    rho0 = mode_impl.one_density_matrix(static["n"])
-    rho_exact = exact_total_state(mode_impl, evolution_data, rho0)
-    rho_deterministic = deterministic_total_state(mode_impl, evolution_data, rho0, r)
+    """Estimate sampled total channel error on all computational-basis pure states for a fixed r."""
+    del t_total
+    basis_exact, basis_deterministic = ensure_basis_batches(mode_impl, static, evolution_data, r)
 
     rng = np.random.default_rng(seed)
-    rho_average = np.zeros_like(rho0)
-    sampled_orders = static.get("s_orders", (2, 3))
+    rho_average = np.zeros_like(basis_exact)
     for _ in tqdm(range(trials), desc=f"r={r}", leave=False, disable=not sys.stderr.isatty()):
-        rho = rho0.copy()
-        for _ in range(r):
-            rho_after_trotter = mode_impl.apply_unitary_channel(evolution_data["S1"], rho)
-            order = int(rng.choice(sampled_orders, p=evolution_data["p_order"]))
-            rho = mode_impl.sample_channel_then_compensate(rng, static, evolution_data, order, rho_after_trotter)
-        rho_average += rho
+        sign, unitary = mode_impl.sample_trajectory_descriptor(rng, static, evolution_data, r)
+        rho_average += mode_impl.apply_signed_unitary_channel_to_basis_states(sign, unitary)
     rho_average /= trials
+    sample_error, _ = max_trace_norm_error(rho_average, basis_exact)
+    sample_fluctuation, _ = max_trace_norm_error(rho_average, basis_deterministic)
 
     return {
-        "sample_error": trace_norm(rho_average - rho_exact),
-        "sample_fluctuation": trace_norm(rho_average - rho_deterministic),
+        "sample_error": sample_error,
+        "sample_fluctuation": sample_fluctuation,
         "expectation_bias": expectation_bias,
         "eta_pair_sum": float(evolution_data["eta_pair_sum"]),
         "pair_scale": float(evolution_data["pair_scale"]),
@@ -269,10 +306,10 @@ def search_r_min(
             if metric_key == "expectation_bias":
                 if r not in evolution_cache:
                     evolution_cache[r] = mode_impl.build_tilde_V(static, t_total, r)
-                rho0 = mode_impl.one_density_matrix(static["n"])
-                rho_exact = exact_total_state(mode_impl, evolution_cache[r], rho0)
-                rho_deterministic = deterministic_total_state(mode_impl, evolution_cache[r], rho0, r)
-                return {"expectation_bias": trace_norm(rho_deterministic - rho_exact)}
+                evolution_data = evolution_cache[r]
+                basis_exact, basis_deterministic = ensure_basis_batches(mode_impl, static, evolution_data, r)
+                expectation_bias, _ = max_trace_norm_error(basis_deterministic, basis_exact, threshold=epsilon)
+                return {"expectation_bias": expectation_bias}
 
             if metric_key == "sample_error":
                 if r in result_cache:
@@ -281,9 +318,8 @@ def search_r_min(
                 if r not in evolution_cache:
                     evolution_cache[r] = mode_impl.build_tilde_V(static, t_total, r)
                 evolution_data = evolution_cache[r]
-                rho0 = mode_impl.one_density_matrix(static["n"])
-                rho_exact = exact_total_state(mode_impl, evolution_data, rho0)
-                rho_deterministic = deterministic_total_state(mode_impl, evolution_data, rho0, r)
+                basis_exact, basis_deterministic = ensure_basis_batches(mode_impl, static, evolution_data, r)
+                expectation_bias, _ = max_trace_norm_error(basis_deterministic, basis_exact)
                 result = estimate_total_sample_error(
                     static=static,
                     t_total=t_total,
@@ -291,7 +327,7 @@ def search_r_min(
                     trials=trials,
                     seed=seed,
                     evolution_data=evolution_data,
-                    expectation_bias=trace_norm(rho_deterministic - rho_exact),
+                    expectation_bias=expectation_bias,
                     mode_impl=mode_impl,
                 )
                 result["seed"] = seed
