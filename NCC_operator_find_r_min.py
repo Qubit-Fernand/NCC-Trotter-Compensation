@@ -64,6 +64,12 @@ CASE_DEFAULTS = {
 
 REQUIRED_CASE_FIELDS = {"mode", "N", "T", "epsilon"}
 
+# This cache is process-global and assumes a fixed mode/static configuration
+# within one batch run. Under that workflow, build_tilde_V is determined by
+# (T, r), so neighboring cases that only change epsilon can reuse the same
+# evolution data.
+EVOLUTION_CACHE: dict[tuple[float, int], dict] = {}
+
 
 def make_search_seed(base_seed: int, repetition: int, r: int) -> int:
     return base_seed + repetition * 100_003 + r * 1_009
@@ -241,7 +247,7 @@ def build_mode_config(args):
 def search_r_min(
     static: dict,
     mode_impl,
-    evolution_cache: dict[int, dict],
+    evolution_cache: dict[tuple[float, int], dict],
     t_total: float,
     epsilon: float,
     trials: int,
@@ -256,17 +262,18 @@ def search_r_min(
 
     def search_min_by(metric_key: str) -> tuple[int, dict]:
         def evaluate_at_r(r: int) -> dict:
-            if r not in evolution_cache:
-                evolution_cache[r] = mode_impl.build_tilde_V(static, t_total, r)
+            cache_key = (float(t_total), int(r))
+            if cache_key not in evolution_cache:
+                evolution_cache[cache_key] = mode_impl.build_tilde_V(static, t_total, r)
 
             if metric_key == "expectation_bias":
-                return {"expectation_bias": evolution_cache[r]["deterministic_bias"]}
+                return {"expectation_bias": evolution_cache[cache_key]["deterministic_bias"]}
 
             if metric_key == "sample_error":
                 if r in result_cache:
                     return result_cache[r]
                 seed = make_search_seed(base_seed, repetition, r)
-                evolution_data = evolution_cache[r]
+                evolution_data = evolution_cache[cache_key]
                 result = estimate_total_sample_error(
                     static=static,
                     t_total=t_total,
@@ -351,8 +358,6 @@ def run_case(args, case_index: int | None = None, total_cases: int | None = None
         "searches": [],
     }
 
-    evolution_cache: dict[int, dict] = {}
-
     def checkpoint():
         save_sampling_checkpoint(output_path, payload)
 
@@ -361,7 +366,7 @@ def run_case(args, case_index: int | None = None, total_cases: int | None = None
         sampled_r_min, metrics, expected_r_min = search_r_min(
             static=config["static"],
             mode_impl=config["mode_impl"],
-            evolution_cache=evolution_cache,
+            evolution_cache=EVOLUTION_CACHE,
             t_total=args.T,
             epsilon=args.epsilon,
             trials=args.trials,

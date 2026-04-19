@@ -34,28 +34,6 @@ from Pauli_Hamiltonian_BCH import (
 )
 
 
-# Lookup table for single-qubit Pauli products with labels 0,1,2,3 = I,X,Y,Z.
-# (2, 1): (-1j, 3) means Y X = -i Z
-SINGLE_QUBIT_PAULI_MULTIPLICATION_TABLE = {
-    (0, 0): (1.0 + 0.0j, 0),
-    (0, 1): (1.0 + 0.0j, 1),
-    (0, 2): (1.0 + 0.0j, 2),
-    (0, 3): (1.0 + 0.0j, 3),
-    (1, 0): (1.0 + 0.0j, 1),
-    (1, 1): (1.0 + 0.0j, 0),
-    (1, 2): (1.0j, 3),
-    (1, 3): (-1.0j, 2),
-    (2, 0): (1.0 + 0.0j, 2),
-    (2, 1): (-1.0j, 3),
-    (2, 2): (1.0 + 0.0j, 0),
-    (2, 3): (1.0j, 1),
-    (3, 0): (1.0 + 0.0j, 3),
-    (3, 1): (1.0j, 2),
-    (3, 2): (-1.0j, 1),
-    (3, 3): (1.0 + 0.0j, 0),
-}
-
-
 def parse_args():
     parser = argparse.ArgumentParser(description="Action-on-rho channel NCC prototype.")
     parser.add_argument("--N", type=int, default=3, help="number of spins")
@@ -97,33 +75,40 @@ def computational_basis_density_matrices(num_qubits: int) -> tuple[np.ndarray, l
     return basis_states, labels
 
 
+def _as_density_matrix_batch(rho: np.ndarray) -> tuple[np.ndarray, bool]:
+    """Normalize a single rho or a rho batch to shape (batch, dim, dim)."""
+    rho = np.asarray(rho, dtype=complex)
+    if rho.ndim == 2:
+        return rho[None, :, :], True
+    if rho.ndim == 3:
+        return rho, False
+    raise ValueError(f"expected rho with ndim 2 or 3, got shape={rho.shape}")
+
+
+def _restore_density_matrix_shape(rho_batch: np.ndarray, single_input: bool) -> np.ndarray:
+    """Undo _as_density_matrix_batch and match the caller's original rank."""
+    return rho_batch[0] if single_input else rho_batch
+
+
 def apply_unitary_channel(unitary: np.ndarray, rho: np.ndarray, sign: complex = 1.0 + 0.0j) -> np.ndarray:
     """Apply rho -> sign * U rho U^dagger."""
-    return sign * (unitary @ rho @ unitary.conj().T)
+    rho_batch, single_input = _as_density_matrix_batch(rho)
+    left_applied = np.einsum("ab,ibc->iac", unitary, rho_batch, optimize=True)
+    out = sign * np.einsum("iac,cd->iad", left_applied, unitary.conj().T, optimize=True)
+    return _restore_density_matrix_shape(out, single_input)
 
 
 def apply_ad_commutator(operator: np.ndarray, rho: np.ndarray) -> np.ndarray:
     """Apply rho -> operator rho - rho operator."""
-    return operator @ rho - rho @ operator
+    rho_batch, single_input = _as_density_matrix_batch(rho)
+    left = np.einsum("ab,ibc->iac", operator, rho_batch, optimize=True)
+    right = np.einsum("iab,bc->iac", rho_batch, operator, optimize=True)
+    out = left - right
+    return _restore_density_matrix_shape(out, single_input)
 
 
 def identity_label(num_qubits: int) -> tuple[int, ...]:
     return (0,) * num_qubits
-
-
-@lru_cache(maxsize=None)
-def multiply_pauli_labels(label_a: tuple[int, ...], label_b: tuple[int, ...]) -> tuple[complex, tuple[int, ...]]:
-    """Multiply two Pauli-string labels and return phase, product-label."""
-    if len(label_a) != len(label_b):
-        raise ValueError("Pauli labels must have the same length")
-
-    phase = 1.0 + 0.0j
-    product = []
-    for single_a, single_b in zip(label_a, label_b):
-        single_phase, single_product = SINGLE_QUBIT_PAULI_MULTIPLICATION_TABLE[(single_a, single_b)]
-        phase *= single_phase
-        product.append(single_product)
-    return phase, tuple(product)
 
 
 def trace_norm(matrix: np.ndarray) -> float:
@@ -131,9 +116,11 @@ def trace_norm(matrix: np.ndarray) -> float:
     return float(np.sum(np.linalg.svd(matrix, compute_uv=False)))
 
 
-def apply_signed_unitary_channel_to_basis_states(sign: complex, unitary: np.ndarray) -> np.ndarray:
+def apply_signed_unitary_channel_to_basis_states(unitary: np.ndarray, sign: complex = 1.0 + 0.0j) -> np.ndarray:
     """Apply a signed unitary channel to all computational-basis pure states at once."""
+    # For computational basis |i>, U|i> is exactly the i-th column of U.
     columns = unitary.T.copy()
+    # Build all |U_i><U_i| outer products at once, one output density matrix per basis state.
     return sign * np.einsum("ai,bi->iab", columns, columns.conj(), optimize=True)
 
 
@@ -418,26 +405,29 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
 
     # F_s(rho) = sum 1/j! * ad_phi_q1 ad_phi_q2(rho)
     def apply_tail_F_channel(order: int, rho: np.ndarray) -> np.ndarray:
-        out = np.zeros_like(rho)
+        rho_batch, single_input = _as_density_matrix_batch(rho)
+        out = np.zeros_like(rho_batch)
         for phi_tuple in F_terms[order]["phi_tuples"]:
-            tuple_out = rho
+            tuple_out = rho_batch
             for phi_order in reversed(phi_tuple["q_tuple"]):
                 tuple_out = apply_ad_commutator(static["Phi_terms"][phi_order], tuple_out)
             out += phi_tuple["factorial_j_scale"] * tuple_out
-        return out
+        return _restore_density_matrix_shape(out, single_input)
 
     # tilde_V(rho) = sum F_s(rho)
     def apply_tilde_V_taylor(rho: np.ndarray) -> np.ndarray:
-        out = rho.copy()
+        rho_batch, single_input = _as_density_matrix_batch(rho)
+        out = rho_batch.copy()
         for order in s_orders:
             if F_terms[order]["kind"] == "pair":
-                out += (t**order) * apply_ad_commutator(static["tilde_F_operator_terms"][order], rho)
+                out += (t**order) * apply_ad_commutator(static["tilde_F_operator_terms"][order], rho_batch)
             else:
-                out += (t**order) * apply_tail_F_channel(order, rho)
-        return out
+                out += (t**order) * apply_tail_F_channel(order, rho_batch)
+        return _restore_density_matrix_shape(out, single_input)
 
     def apply_tilde_V_expectation(rho: np.ndarray) -> np.ndarray:
-        out = np.zeros_like(rho)
+        rho_batch, single_input = _as_density_matrix_batch(rho)
+        out = np.zeros_like(rho_batch)
         for order in s_orders:
             weight = raw_weights[order]
             data = F_terms[order]
@@ -445,14 +435,20 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
                 for Pauli in pair_components[order]:
                     # for this part, weight contains eta_2/eta * pair_scale
                     # eta_2/eta * pair_scale (I + i eta ad_W)/pair_sacle
-                    out += weight * Pauli["prob"] * (rho + eta_pair_sum * apply_ad_commutator(1j * Pauli["W_mat"], rho)) / pair_scale
+                    out += (
+                        weight
+                        * Pauli["prob"]
+                        * (rho_batch + eta_pair_sum * apply_ad_commutator(1j * Pauli["W_mat"], rho_batch))
+                        / pair_scale
+                    )
             else:
                 # for this part, weight contains sum 2^j eta_s = data["sampling_l1_norm"]
-                out += weight * apply_tail_F_channel(order, rho) / data["sampling_l1_norm"]
-        return out
+                out += weight * apply_tail_F_channel(order, rho_batch) / data["sampling_l1_norm"]
+        return _restore_density_matrix_shape(out, single_input)
 
     validation_states, _ = computational_basis_density_matrices(static["n"])
-    validation_error = max(trace_norm(apply_tilde_V_expectation(rho) - apply_tilde_V_taylor(rho)) for rho in validation_states)
+    validation_diff = apply_tilde_V_expectation(validation_states) - apply_tilde_V_taylor(validation_states)
+    validation_error = max(trace_norm(rho) for rho in validation_diff)
     if validation_error > validation_tol:
         raise ValueError(f"channel tilde_V mismatch between compensation expectation and Taylor action: {validation_error:.3e}")
 
@@ -474,6 +470,7 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
         "apply_tilde_V_expectation": apply_tilde_V_expectation,
         **pair_params,
     }
+
 
 def sample_channel_then_compensate_descriptor(
     rng: np.random.Generator,
@@ -572,35 +569,21 @@ def main():
     evolution_data = build_tilde_V(static, t_total, r)
 
     basis_states, basis_labels = computational_basis_density_matrices(n)
-    rho_single_exact = np.array(
-        [apply_unitary_channel(evolution_data["step_exact"], rho) for rho in basis_states],
-        dtype=complex,
-    )
-    rho_single_before = np.array(
-        [apply_unitary_channel(evolution_data["S1"], rho) for rho in basis_states],
-        dtype=complex,
-    )
+    rho_single_exact = apply_signed_unitary_channel_to_basis_states(evolution_data["step_exact"])
+    rho_single_before = apply_signed_unitary_channel_to_basis_states(evolution_data["S1"])
     rho_single_deterministic = np.array(
         [evolution_data["apply_tilde_V_expectation"](rho) for rho in rho_single_before],
         dtype=complex,
     )
 
-    rho_total_exact = np.array(
-        [apply_unitary_channel(evolution_data["U_exact"], rho) for rho in basis_states],
-        dtype=complex,
+    rho_total_exact = apply_signed_unitary_channel_to_basis_states(evolution_data["U_exact"])
+    rho_total_before = apply_signed_unitary_channel_to_basis_states(
+        np.linalg.matrix_power(evolution_data["S1"], r),
     )
-    rho_total_before = basis_states.copy()
     rho_total_deterministic = basis_states.copy()
     for _ in range(r):
-        rho_total_before = np.array(
-            [apply_unitary_channel(evolution_data["S1"], rho) for rho in rho_total_before],
-            dtype=complex,
-        )
         rho_total_deterministic = np.array(
-            [
-                evolution_data["apply_tilde_V_expectation"](apply_unitary_channel(evolution_data["S1"], rho))
-                for rho in rho_total_deterministic
-            ],
+            [evolution_data["apply_tilde_V_expectation"](apply_unitary_channel(evolution_data["S1"], rho)) for rho in rho_total_deterministic],
             dtype=complex,
         )
 
@@ -625,7 +608,7 @@ def main():
         average = np.zeros_like(rho_single_exact)
         for _ in tqdm(range(num_trials), desc="single-step channel trials"):
             sign, unitary = sample_trotter_step_descriptor(rng, static, evolution_data)
-            sample = apply_signed_unitary_channel_to_basis_states(sign, unitary)
+            sample = apply_signed_unitary_channel_to_basis_states(unitary, sign)
             average += sample
             if rho_list is not None:
                 rho_list.append(sample)
@@ -648,7 +631,7 @@ def main():
         average = np.zeros_like(rho_total_exact)
         for _ in tqdm(range(num_trials), desc="multi-step channel trials"):
             sign, unitary = sample_trajectory_descriptor(rng, static, evolution_data, r)
-            rho = apply_signed_unitary_channel_to_basis_states(sign, unitary)
+            rho = apply_signed_unitary_channel_to_basis_states(unitary, sign)
             average += rho
             if rho_list is not None:
                 rho_list.append(rho)

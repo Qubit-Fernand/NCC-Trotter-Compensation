@@ -1,0 +1,79 @@
+{
+  "script": "NCC_sampling_r.py",
+  "mode": "log",
+  "params": {
+    "N": 3,
+    "J": 1.0,
+    "h": 1.0,
+    "T": 0.4,
+    "epsilon": 0.3,
+    "trials": 4,
+    "repeats": 2,
+    "base_seed": 7,
+    "r_max": 16,
+    "q0": 3,
+    "s0": 3
+  },
+  "sampled_r_mins": [
+    2,
+    2
+  ],
+  "expected_r_mins": [
+    2,
+    2
+  ],
+  "sample_errors": [
+    0.29690277045526814,
+    0.29108879467981685
+  ],
+  "expectation_biases": [
+    0.0512789829300596,
+    0.0512789829300596
+  ],
+  "sample_fluctuations": [
+    0.2968595492119842,
+    0.2837141657132251
+  ],
+  "ci_low_history": [
+    2.0,
+    2.0
+  ],
+  "ci_high_history": [
+    2.0,
+    2.0
+  ],
+  "searches": [
+    {
+      "repetition": 0,
+      "r": 1,
+      "sample_error": 1.4515231745415613,
+      "sample_fluctuation": 1.537225735511952,
+      "expectation_bias": 0.4467840989135407,
+      "seed": 1016
+    },
+    {
+      "repetition": 0,
+      "r": 2,
+      "sample_error": 0.29690277045526814,
+      "sample_fluctuation": 0.2968595492119842,
+      "expectation_bias": 0.0512789829300596,
+      "seed": 2025
+    },
+    {
+      "repetition": 1,
+      "r": 1,
+      "sample_error": 1.1320693014729901,
+      "sample_fluctuation": 1.1160565060519119,
+      "expectation_bias": 0.4467840989135407,
+      "seed": 101019
+    },
+    {
+      "repetition": 1,
+      "r": 2,
+      "sample_error": 0.29108879467981685,
+      "sample_fluctuation": 0.2837141657132251,
+      "expectation_bias": 0.0512789829300596,
+      "seed": 102028
+    }
+  ]
+}

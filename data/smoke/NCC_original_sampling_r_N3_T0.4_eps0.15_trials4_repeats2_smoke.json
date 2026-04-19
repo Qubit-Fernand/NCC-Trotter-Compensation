@@ -1,0 +1,111 @@
+{
+  "script": "NCC_sampling_r.py",
+  "mode": "original",
+  "params": {
+    "N": 3,
+    "J": 1.0,
+    "h": 1.0,
+    "T": 0.4,
+    "epsilon": 0.15,
+    "trials": 4,
+    "repeats": 2,
+    "base_seed": 7,
+    "r_max": 16,
+    "q0": null,
+    "s0": null
+  },
+  "sampled_r_mins": [
+    4,
+    4
+  ],
+  "expected_r_mins": [
+    2,
+    2
+  ],
+  "sample_errors": [
+    0.10624178296750598,
+    0.08201058926020689
+  ],
+  "expectation_biases": [
+    0.006192229259605865,
+    0.006192229259605865
+  ],
+  "sample_fluctuations": [
+    0.10671411813526296,
+    0.08086258597247073
+  ],
+  "ci_low_history": [
+    4.0,
+    4.0
+  ],
+  "ci_high_history": [
+    4.0,
+    4.0
+  ],
+  "searches": [
+    {
+      "repetition": 0,
+      "r": 1,
+      "sample_error": 1.4515231745415615,
+      "sample_fluctuation": 1.5372257355119523,
+      "expectation_bias": 0.4467840989135409,
+      "seed": 1016
+    },
+    {
+      "repetition": 0,
+      "r": 2,
+      "sample_error": 0.29690277045526803,
+      "sample_fluctuation": 0.29685954921198415,
+      "expectation_bias": 0.05127898293005944,
+      "seed": 2025
+    },
+    {
+      "repetition": 0,
+      "r": 4,
+      "sample_error": 0.10624178296750598,
+      "sample_fluctuation": 0.10671411813526296,
+      "expectation_bias": 0.006192229259605865,
+      "seed": 4043
+    },
+    {
+      "repetition": 0,
+      "r": 3,
+      "sample_error": 0.1711289918395667,
+      "sample_fluctuation": 0.1690169072084867,
+      "expectation_bias": 0.014810458684761696,
+      "seed": 3034
+    },
+    {
+      "repetition": 1,
+      "r": 1,
+      "sample_error": 1.1320693014729903,
+      "sample_fluctuation": 1.1160565060519119,
+      "expectation_bias": 0.4467840989135409,
+      "seed": 101019
+    },
+    {
+      "repetition": 1,
+      "r": 2,
+      "sample_error": 0.2910887946798168,
+      "sample_fluctuation": 0.28371416571322505,
+      "expectation_bias": 0.05127898293005944,
+      "seed": 102028
+    },
+    {
+      "repetition": 1,
+      "r": 4,
+      "sample_error": 0.08201058926020689,
+      "sample_fluctuation": 0.08086258597247073,
+      "expectation_bias": 0.006192229259605865,
+      "seed": 104046
+    },
+    {
+      "repetition": 1,
+      "r": 3,
+      "sample_error": 0.15119121181641038,
+      "sample_fluctuation": 0.14659441803067416,
+      "expectation_bias": 0.014810458684761696,
+      "seed": 103037
+    }
+  ]
+}

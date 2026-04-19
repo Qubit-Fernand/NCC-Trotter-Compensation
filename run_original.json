@@ -6,101 +6,21 @@
     "r_max": 1024
   },
   "cases": [
-    {
-      "mode": "original",
-      "N": 8,
-      "T": 0.2,
-      "epsilon": 0.001
-    },
-    {
-      "mode": "original",
-      "N": 8,
-      "T": 0.4,
-      "epsilon": 0.001
-    },
-    {
-      "mode": "original",
-      "N": 8,
-      "T": 0.6,
-      "epsilon": 0.001
-    },
-    {
-      "mode": "original",
-      "N": 8,
-      "T": 0.8,
-      "epsilon": 0.001
-    },
-    {
-      "mode": "original",
-      "N": 8,
-      "T": 1.0,
-      "epsilon": 0.001
-    },
-    {
-      "mode": "original",
-      "N": 8,
-      "T": 2.0,
-      "epsilon": 0.001
-    },
-    {
-      "mode": "original",
-      "N": 8,
-      "T": 2.0,
-      "epsilon": 0.0025
-    },
-    {
-      "mode": "original",
-      "N": 8,
-      "T": 2.0,
-      "epsilon": 0.005
-    },
-    {
-      "mode": "original",
-      "N": 8,
-      "T": 2.0,
-      "epsilon": 0.01
-    },
-    {
-      "mode": "original",
-      "N": 8,
-      "T": 2.0,
-      "epsilon": 0.02
-    },
-    {
-      "mode": "original",
-      "N": 8,
-      "T": 2.0,
-      "epsilon": 0.04
-    },
-    {
-      "mode": "original",
-      "N": 8,
-      "T": 2.0,
-      "epsilon": 0.1
-    },
-    {
-      "mode": "original",
-      "N": 4,
-      "T": 2.0,
-      "epsilon": 0.001
-    },
-    {
-      "mode": "original",
-      "N": 5,
-      "T": 2.0,
-      "epsilon": 0.001
-    },
-    {
-      "mode": "original",
-      "N": 6,
-      "T": 2.0,
-      "epsilon": 0.001
-    },
-    {
-      "mode": "original",
-      "N": 7,
-      "T": 2.0,
-      "epsilon": 0.001
-    }
+    { "mode": "original", "N": 8, "T": 0.2, "epsilon": 0.001 },
+    { "mode": "original", "N": 8, "T": 0.4, "epsilon": 0.001 },
+    { "mode": "original", "N": 8, "T": 0.6, "epsilon": 0.001 },
+    { "mode": "original", "N": 8, "T": 0.8, "epsilon": 0.001 },
+    { "mode": "original", "N": 8, "T": 1.0, "epsilon": 0.001 },
+    { "mode": "original", "N": 8, "T": 2.0, "epsilon": 0.001 },
+    { "mode": "original", "N": 8, "T": 2.0, "epsilon": 0.0025 },
+    { "mode": "original", "N": 8, "T": 2.0, "epsilon": 0.005 },
+    { "mode": "original", "N": 8, "T": 2.0, "epsilon": 0.01 },
+    { "mode": "original", "N": 8, "T": 2.0, "epsilon": 0.02 },
+    { "mode": "original", "N": 8, "T": 2.0, "epsilon": 0.04 },
+    { "mode": "original", "N": 8, "T": 2.0, "epsilon": 0.1 },
+    { "mode": "original", "N": 4, "T": 2.0, "epsilon": 0.001 },
+    { "mode": "original", "N": 5, "T": 2.0, "epsilon": 0.001 },
+    { "mode": "original", "N": 6, "T": 2.0, "epsilon": 0.001 },
+    { "mode": "original", "N": 7, "T": 2.0, "epsilon": 0.001 }
   ]
 }

@@ -66,6 +66,12 @@ CASE_DEFAULTS = {
 
 REQUIRED_CASE_FIELDS = {"mode", "N", "T", "epsilon"}
 
+# This cache is process-global and assumes a fixed mode/static configuration
+# within one batch run. Under that workflow, build_tilde_V is determined by
+# (T, r), so neighboring cases that only change epsilon can reuse the same
+# evolution data and any lazily attached basis batches.
+EVOLUTION_CACHE: dict[tuple[float, int], dict] = {}
+
 
 def make_search_seed(base_seed: int, repetition: int, r: int) -> int:
     return base_seed + repetition * 100_003 + r * 1_009
@@ -194,35 +200,50 @@ def trace_norm(matrix: np.ndarray) -> float:
     return float(np.sum(np.linalg.svd(matrix, compute_uv=False)))
 
 
+def trace_norm_batch(matrices: np.ndarray) -> np.ndarray:
+    """Return the trace norm for a batch of matrices."""
+    matrices = np.asarray(matrices, dtype=complex)
+    if matrices.ndim == 2:
+        return np.array([trace_norm(matrices)], dtype=float)
+    if matrices.ndim != 3:
+        raise ValueError(f"expected matrix batch with ndim 2 or 3, got shape={matrices.shape}")
+    return np.sum(np.linalg.svd(matrices, compute_uv=False), axis=-1).astype(float, copy=False)
+
+
 def exact_total_states(mode_impl, evolution_data: dict, basis_states: np.ndarray) -> np.ndarray:
-    return np.array(
-        [mode_impl.apply_unitary_channel(evolution_data["U_exact"], rho) for rho in basis_states],
-        dtype=complex,
-    )
+    del basis_states
+    return mode_impl.apply_signed_unitary_channel_to_basis_states(evolution_data["U_exact"])
 
 
 def deterministic_total_states(mode_impl, evolution_data: dict, basis_states: np.ndarray, r: int) -> np.ndarray:
     out = basis_states.copy()
     for _ in range(r):
-        out = np.array(
-            [evolution_data["apply_tilde_V_expectation"](mode_impl.apply_unitary_channel(evolution_data["S1"], rho)) for rho in out],
-            dtype=complex,
-        )
+        out = evolution_data["apply_tilde_V_expectation"](mode_impl.apply_unitary_channel(evolution_data["S1"], out))
     return out
 
 
 def max_trace_norm_error(states_a: np.ndarray, states_b: np.ndarray, threshold: float | None = None) -> tuple[float, int]:
     """Return the maximum trace-norm error over two state batches, with optional early exit."""
+    diffs = np.asarray(states_a - states_b, dtype=complex)
+    if threshold is None:
+        errors = trace_norm_batch(diffs)
+        worst_index = int(np.argmax(errors))
+        return float(errors[worst_index]), worst_index
+
     max_error = 0.0
     worst_index = 0
-    for idx, (state_a, state_b) in enumerate(zip(states_a, states_b)):
-        error = trace_norm(state_a - state_b)
-        if error > max_error:
-            max_error = error
-            worst_index = idx
-        # During r_min search, one violating basis state is enough to reject this r.
-        if threshold is not None and error > threshold:
-            return float(error), idx  # exit
+    chunk_size = 16
+    for start in range(0, diffs.shape[0], chunk_size):
+        chunk_errors = trace_norm_batch(diffs[start : start + chunk_size])
+        local_idx = int(np.argmax(chunk_errors))
+        local_error = float(chunk_errors[local_idx])
+        if local_error > max_error:
+            max_error = local_error
+            worst_index = start + local_idx
+        violating = np.flatnonzero(chunk_errors > threshold)
+        if violating.size:
+            first = int(violating[0])
+            return float(chunk_errors[first]), start + first
     return float(max_error), worst_index
 
 
@@ -231,16 +252,16 @@ def ensure_basis_batches(mode_impl, static: dict, evolution_data: dict, r: int) 
         basis_states, basis_labels = mode_impl.computational_basis_density_matrices(static["n"])
         evolution_data["basis_states"] = basis_states
         evolution_data["basis_labels"] = np.array(basis_labels)
-    if "basis_exact" not in evolution_data:
-        evolution_data["basis_exact"] = exact_total_states(mode_impl, evolution_data, evolution_data["basis_states"])
-    if "basis_deterministic" not in evolution_data:
-        evolution_data["basis_deterministic"] = deterministic_total_states(
+    if "exact_output_batch" not in evolution_data:
+        evolution_data["exact_output_batch"] = exact_total_states(mode_impl, evolution_data, evolution_data["basis_states"])
+    if "deterministic_output_batch" not in evolution_data:
+        evolution_data["deterministic_output_batch"] = deterministic_total_states(
             mode_impl,
             evolution_data,
             evolution_data["basis_states"],
             r,
         )
-    return evolution_data["basis_exact"], evolution_data["basis_deterministic"]
+    return evolution_data["exact_output_batch"], evolution_data["deterministic_output_batch"]
 
 
 def resolve_mode_impl(mode: str):
@@ -263,16 +284,16 @@ def estimate_total_sample_error(
 ):
     """Estimate sampled total channel error on all computational-basis pure states for a fixed r."""
     del t_total
-    basis_exact, basis_deterministic = ensure_basis_batches(mode_impl, static, evolution_data, r)
+    exact_output_batch, deterministic_output_batch = ensure_basis_batches(mode_impl, static, evolution_data, r)
 
     rng = np.random.default_rng(seed)
-    rho_average = np.zeros_like(basis_exact)
+    rho_average = np.zeros_like(exact_output_batch)
     for _ in tqdm(range(trials), desc=f"r={r}", leave=False, disable=not sys.stderr.isatty()):
         sign, unitary = mode_impl.sample_trajectory_descriptor(rng, static, evolution_data, r)
-        rho_average += mode_impl.apply_signed_unitary_channel_to_basis_states(sign, unitary)
+        rho_average += mode_impl.apply_signed_unitary_channel_to_basis_states(unitary, sign)
     rho_average /= trials
-    sample_error, _ = max_trace_norm_error(rho_average, basis_exact)
-    sample_fluctuation, _ = max_trace_norm_error(rho_average, basis_deterministic)
+    sample_error, _ = max_trace_norm_error(rho_average, exact_output_batch)
+    sample_fluctuation, _ = max_trace_norm_error(rho_average, deterministic_output_batch)
 
     return {
         "sample_error": sample_error,
@@ -286,7 +307,7 @@ def estimate_total_sample_error(
 
 def search_r_min(
     static: dict,
-    evolution_cache: dict[int, dict],
+    evolution_cache: dict[tuple[float, int], dict],
     t_total: float,
     epsilon: float,
     trials: int,
@@ -303,23 +324,24 @@ def search_r_min(
 
     def search_min_by(metric_key: str) -> tuple[int, dict]:
         def evaluate_at_r(r: int) -> dict:
+            cache_key = (float(t_total), int(r))
             if metric_key == "expectation_bias":
-                if r not in evolution_cache:
-                    evolution_cache[r] = mode_impl.build_tilde_V(static, t_total, r)
-                evolution_data = evolution_cache[r]
-                basis_exact, basis_deterministic = ensure_basis_batches(mode_impl, static, evolution_data, r)
-                expectation_bias, _ = max_trace_norm_error(basis_deterministic, basis_exact, threshold=epsilon)
+                if cache_key not in evolution_cache:
+                    evolution_cache[cache_key] = mode_impl.build_tilde_V(static, t_total, r)
+                evolution_data = evolution_cache[cache_key]
+                exact_output_batch, deterministic_output_batch = ensure_basis_batches(mode_impl, static, evolution_data, r)
+                expectation_bias, _ = max_trace_norm_error(deterministic_output_batch, exact_output_batch, threshold=epsilon)
                 return {"expectation_bias": expectation_bias}
 
             if metric_key == "sample_error":
                 if r in result_cache:
                     return result_cache[r]
                 seed = make_search_seed(base_seed, repetition, r)
-                if r not in evolution_cache:
-                    evolution_cache[r] = mode_impl.build_tilde_V(static, t_total, r)
-                evolution_data = evolution_cache[r]
-                basis_exact, basis_deterministic = ensure_basis_batches(mode_impl, static, evolution_data, r)
-                expectation_bias, _ = max_trace_norm_error(basis_deterministic, basis_exact)
+                if cache_key not in evolution_cache:
+                    evolution_cache[cache_key] = mode_impl.build_tilde_V(static, t_total, r)
+                evolution_data = evolution_cache[cache_key]
+                exact_output_batch, deterministic_output_batch = ensure_basis_batches(mode_impl, static, evolution_data, r)
+                expectation_bias, _ = max_trace_norm_error(deterministic_output_batch, exact_output_batch)
                 result = estimate_total_sample_error(
                     static=static,
                     t_total=t_total,
@@ -386,7 +408,6 @@ def run_case(args, case_index=None, total_cases=None):
         static = mode_impl.build_static_data(n=args.N, j=args.J, h=args.h)
     else:
         static = mode_impl.build_static_data(n=args.N, q0=q0, s0=s0, j=args.J, h=args.h, K=1)
-    evolution_cache: dict[int, dict] = {}
     payload = {
         "script": "NCC_channel_sampling_r.py",
         "mode": args.mode,
@@ -420,7 +441,7 @@ def run_case(args, case_index=None, total_cases=None):
         label = f"{case_prefix}[repeat {repetition + 1}/{args.repeats}]"
         sampled_r_min, metrics, expected_r_min = search_r_min(
             static=static,
-            evolution_cache=evolution_cache,
+            evolution_cache=EVOLUTION_CACHE,
             t_total=args.T,
             epsilon=args.epsilon,
             trials=args.trials,
