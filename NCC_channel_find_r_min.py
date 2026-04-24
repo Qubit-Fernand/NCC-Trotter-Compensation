@@ -210,12 +210,12 @@ def trace_norm_batch(matrices: np.ndarray) -> np.ndarray:
     return np.sum(np.linalg.svd(matrices, compute_uv=False), axis=-1).astype(float, copy=False)
 
 
-def exact_total_states(mode_impl, evolution_data: dict, basis_states: np.ndarray) -> np.ndarray:
+def exact_output_states(mode_impl, evolution_data: dict, basis_states: np.ndarray) -> np.ndarray:
     del basis_states
     return mode_impl.apply_signed_unitary_channel_to_basis_states(evolution_data["U_exact"])
 
 
-def deterministic_total_states(mode_impl, evolution_data: dict, basis_states: np.ndarray, r: int) -> np.ndarray:
+def deterministic_output_states(mode_impl, evolution_data: dict, basis_states: np.ndarray, r: int) -> np.ndarray:
     out = basis_states.copy()
     for _ in range(r):
         out = evolution_data["apply_tilde_V_expectation"](mode_impl.apply_unitary_channel(evolution_data["S1"], out))
@@ -253,9 +253,9 @@ def ensure_basis_batches(mode_impl, static: dict, evolution_data: dict, r: int) 
         evolution_data["basis_states"] = basis_states
         evolution_data["basis_labels"] = np.array(basis_labels)
     if "exact_output_batch" not in evolution_data:
-        evolution_data["exact_output_batch"] = exact_total_states(mode_impl, evolution_data, evolution_data["basis_states"])
+        evolution_data["exact_output_batch"] = exact_output_states(mode_impl, evolution_data, evolution_data["basis_states"])
     if "deterministic_output_batch" not in evolution_data:
-        evolution_data["deterministic_output_batch"] = deterministic_total_states(
+        evolution_data["deterministic_output_batch"] = deterministic_output_states(
             mode_impl,
             evolution_data,
             evolution_data["basis_states"],
