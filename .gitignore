@@ -31,3 +31,8 @@ logs/
 *.log
 *.out
 *.bib
+
+# Root-level run configs/results: keep only the canonical pair.
+/*.json
+!/run_original.json
+!/run_log.json
