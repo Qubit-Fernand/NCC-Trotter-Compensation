@@ -24,6 +24,8 @@ data_Ising/
 # /*.sh
 
 logs/
+bohr*/
+.bohrium/
 .claude/
 .venv/
 .codex
