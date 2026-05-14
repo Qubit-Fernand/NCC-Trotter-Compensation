@@ -68,9 +68,9 @@ REQUIRED_CASE_FIELDS = {"mode", "N", "T", "epsilon"}
 
 # This cache is process-global and assumes a fixed mode/static configuration
 # within one batch run. Under that workflow, build_tilde_V is determined by
-# (T, r), so neighboring cases that only change epsilon can reuse the same
-# evolution data and any lazily attached basis batches.
-EVOLUTION_CACHE: dict[tuple[float, int], dict] = {}
+# (N, T, r), so neighboring cases that only change epsilon can reuse the same
+# evolution data and any lazily attached basis batches without crossing system sizes.
+EVOLUTION_CACHE: dict[tuple[int, float, int], dict] = {}
 
 
 def make_search_seed(base_seed: int, repetition: int, r: int) -> int:
@@ -307,7 +307,7 @@ def estimate_total_sample_error(
 
 def search_r_min(
     static: dict,
-    evolution_cache: dict[tuple[float, int], dict],
+    evolution_cache: dict[tuple[int, float, int], dict],
     t_total: float,
     epsilon: float,
     trials: int,
@@ -324,7 +324,7 @@ def search_r_min(
 
     def search_min_by(metric_key: str) -> tuple[int, dict]:
         def evaluate_at_r(r: int) -> dict:
-            cache_key = (float(t_total), int(r))
+            cache_key = (int(static["n"]), float(t_total), int(r))
             if metric_key == "expectation_bias":
                 if cache_key not in evolution_cache:
                     evolution_cache[cache_key] = mode_impl.build_tilde_V(static, t_total, r)
