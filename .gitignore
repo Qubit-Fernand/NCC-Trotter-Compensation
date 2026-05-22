@@ -38,3 +38,4 @@ bohr*/
 /*.json
 !/run_original.json
 !/run_log.json
+/run_ncc.sh
