@@ -29,6 +29,7 @@ bohr*/
 .claude/
 .venv/
 .codex
+/MEMORY.md
 
 *.log
 *.out
