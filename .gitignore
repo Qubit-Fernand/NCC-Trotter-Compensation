@@ -29,7 +29,7 @@ bohr*/
 .claude/
 .venv/
 .codex
-/MEMORY.md
+/codex_memory.md
 
 *.log
 *.out
@@ -37,6 +37,9 @@ bohr*/
 
 # Root-level run configs/results: keep only the canonical pair.
 /*.json
+/*.sh
 !/run_original.json
 !/run_log.json
 /run_ncc.sh
+/overleaf
+
