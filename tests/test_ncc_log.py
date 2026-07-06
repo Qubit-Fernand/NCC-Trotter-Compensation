@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from Pauli_Hamiltonian_BCH import (
+from scaling.Pauli_Hamiltonian_BCH import (
     build_periodic_ab,
     cached_pauli_matrix_from_label,
     commutator,

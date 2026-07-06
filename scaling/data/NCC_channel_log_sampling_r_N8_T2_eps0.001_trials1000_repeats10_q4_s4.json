@@ -1,0 +1,282 @@
+{
+  "script": "NCC_channel_sampling_r.py",
+  "mode": "log",
+  "params": {
+    "N": 8,
+    "J": 1.0,
+    "h": 1.0,
+    "T": 2.0,
+    "epsilon": 0.001,
+    "trials": 1000,
+    "repeats": 10,
+    "base_seed": 7,
+    "r_max": 4096,
+    "s0": 4,
+    "q0": 4
+  },
+  "sampled_r_mins": [
+    1126
+  ],
+  "expected_r_mins": [
+    63
+  ],
+  "sample_errors": [
+    0.0006043567238821877
+  ],
+  "expectation_biases": [
+    9.570711094616509e-09
+  ],
+  "sample_fluctuations": [
+    0.0006043563492242204
+  ],
+  "ci_low_history": [
+    1126.0
+  ],
+  "ci_high_history": [
+    1126.0
+  ],
+  "searches": [
+    {
+      "repetition": 0,
+      "r": 1,
+      "sample_error": 32778.9243791846,
+      "sample_fluctuation": 38154.88312561984,
+      "expectation_bias": 7766.960875125021,
+      "eta_pair_sum": 3583.999999999999,
+      "pair_scale": 7168.000069754063,
+      "raw_l1_norm_total": 187050.66673642074,
+      "seed": 1016
+    },
+    {
+      "repetition": 0,
+      "r": 2,
+      "sample_error": 40136568.386119835,
+      "sample_fluctuation": 40144314.6105384,
+      "expectation_bias": 239995.759887297,
+      "eta_pair_sum": 479.9999999999999,
+      "pair_scale": 960.0005208332376,
+      "raw_l1_norm_total": 12202.667187499905,
+      "seed": 2025
+    },
+    {
+      "repetition": 0,
+      "r": 4,
+      "sample_error": 149419943065.84464,
+      "sample_fluctuation": 149419945589.10452,
+      "expectation_bias": 663578.8390893352,
+      "eta_pair_sum": 67.99999999999999,
+      "pair_scale": 136.0036764208966,
+      "raw_l1_norm_total": 838.6703430875633,
+      "seed": 4043
+    },
+    {
+      "repetition": 0,
+      "r": 8,
+      "sample_error": 96124190820107.11,
+      "sample_fluctuation": 96124190820104.67,
+      "expectation_bias": 233.84806900353522,
+      "eta_pair_sum": 10.499999999999998,
+      "pair_scale": 21.02379604162858,
+      "raw_l1_norm_total": 64.94046270829526,
+      "seed": 8079
+    },
+    {
+      "repetition": 0,
+      "r": 16,
+      "sample_error": 3145539253868.6323,
+      "sample_fluctuation": 3145539253868.6333,
+      "expectation_bias": 0.26908931185909785,
+      "eta_pair_sum": 1.8124999999999998,
+      "pair_scale": 3.7604022391228296,
+      "raw_l1_norm_total": 6.505193905789497,
+      "seed": 16151
+    },
+    {
+      "repetition": 0,
+      "r": 32,
+      "sample_error": 12539.400410242375,
+      "sample_fluctuation": 12539.40083149118,
+      "expectation_bias": 0.01566187410073149,
+      "eta_pair_sum": 0.3515625,
+      "pair_scale": 1.2224503121292905,
+      "raw_l1_norm_total": 1.393999791295957,
+      "seed": 32295
+    },
+    {
+      "repetition": 0,
+      "r": 64,
+      "sample_error": 0.9912446848449002,
+      "sample_fluctuation": 0.9912482675665203,
+      "expectation_bias": 0.0009380254746281027,
+      "eta_pair_sum": 0.0751953125,
+      "pair_scale": 1.0112454400826196,
+      "raw_l1_norm_total": 1.0219672825305361,
+      "seed": 64583
+    },
+    {
+      "repetition": 0,
+      "r": 128,
+      "sample_error": 0.09761449251886943,
+      "sample_fluctuation": 0.09761533145436956,
+      "expectation_bias": 5.7717424366468096e-05,
+      "eta_pair_sum": 0.0172119140625,
+      "pair_scale": 1.0005923245472053,
+      "raw_l1_norm_total": 1.0012624397002001,
+      "seed": 129159
+    },
+    {
+      "repetition": 0,
+      "r": 256,
+      "sample_error": 0.021362021440101974,
+      "sample_fluctuation": 0.021361823136202815,
+      "expectation_bias": 3.5898222551202917e-06,
+      "eta_pair_sum": 0.0041046142578125,
+      "pair_scale": 1.0000336951487292,
+      "raw_l1_norm_total": 1.0000755773457914,
+      "seed": 258311
+    },
+    {
+      "repetition": 0,
+      "r": 512,
+      "sample_error": 0.0038193168458666936,
+      "sample_fluctuation": 0.0038193013781408092,
+      "expectation_bias": 2.2401322532653713e-07,
+      "eta_pair_sum": 0.0010013580322265625,
+      "pair_scale": 1.0000020054338066,
+      "raw_l1_norm_total": 1.0000046230711228,
+      "seed": 516615
+    },
+    {
+      "repetition": 0,
+      "r": 1024,
+      "sample_error": 0.002045808214168379,
+      "sample_fluctuation": 0.002045808008557773,
+      "expectation_bias": 1.3993165939332086e-08,
+      "eta_pair_sum": 0.0002472400665283203,
+      "pair_scale": 1.0000001222552937,
+      "raw_l1_norm_total": 1.000000285857626,
+      "seed": 1033223
+    },
+    {
+      "repetition": 0,
+      "r": 2048,
+      "sample_error": 0.00020885872030645215,
+      "sample_fluctuation": 0.00020885872733380606,
+      "expectation_bias": 8.74559580432078e-10,
+      "eta_pair_sum": 6.142258644104004e-05,
+      "pair_scale": 1.0000000075454683,
+      "raw_l1_norm_total": 1.000000017770614,
+      "seed": 2066439
+    },
+    {
+      "repetition": 0,
+      "r": 1536,
+      "sample_error": 0.00033141335616733913,
+      "sample_fluctuation": 0.00033141313640093153,
+      "expectation_bias": 2.763801611428247e-09,
+      "eta_pair_sum": 0.00010942529748987268,
+      "pair_scale": 1.000000023947791,
+      "raw_l1_norm_total": 1.0000000562643012,
+      "seed": 1549831
+    },
+    {
+      "repetition": 0,
+      "r": 1280,
+      "sample_error": 0.0004659039628026957,
+      "sample_fluctuation": 0.00046590411434459185,
+      "expectation_bias": 5.731088960100859e-09,
+      "eta_pair_sum": 0.00015783691406250002,
+      "pair_scale": 1.0000000498249817,
+      "raw_l1_norm_total": 1.0000001168364971,
+      "seed": 1291527
+    },
+    {
+      "repetition": 0,
+      "r": 1152,
+      "sample_error": 0.0005769142647382572,
+      "sample_fluctuation": 0.0005769144867028638,
+      "expectation_bias": 8.735418388209989e-09,
+      "eta_pair_sum": 0.0001950780714163237,
+      "pair_scale": 1.0000000761109051,
+      "raw_l1_norm_total": 1.0000001782470358,
+      "seed": 1162375
+    },
+    {
+      "repetition": 0,
+      "r": 1088,
+      "sample_error": 0.0020232743289149537,
+      "sample_fluctuation": 0.002023274855762506,
+      "expectation_bias": 1.097962585082392e-08,
+      "eta_pair_sum": 0.00021884700030531243,
+      "pair_scale": 1.0000000957880144,
+      "raw_l1_norm_total": 1.0000002241610277,
+      "seed": 1097799
+    },
+    {
+      "repetition": 0,
+      "r": 1120,
+      "sample_error": 0.0017730977686966905,
+      "sample_fluctuation": 0.0017730979609650263,
+      "expectation_bias": 9.777474303759153e-09,
+      "eta_pair_sum": 0.00020645043731778423,
+      "pair_scale": 1.0000000852435624,
+      "raw_l1_norm_total": 1.0000001995622492,
+      "seed": 1130087
+    },
+    {
+      "repetition": 0,
+      "r": 1136,
+      "sample_error": 0.000558885486016915,
+      "sample_fluctuation": 0.0005588856028271215,
+      "expectation_bias": 9.23807633099139e-09,
+      "eta_pair_sum": 0.0002006434560547175,
+      "pair_scale": 1.0000000805155898,
+      "raw_l1_norm_total": 1.0000001885285805,
+      "seed": 1146231
+    },
+    {
+      "repetition": 0,
+      "r": 1128,
+      "sample_error": 0.0006067557687539234,
+      "sample_fluctuation": 0.000606755768754793,
+      "expectation_bias": 9.503009267621943e-09,
+      "eta_pair_sum": 0.0002035158840490992,
+      "pair_scale": 1.0000000828374265,
+      "raw_l1_norm_total": 1.0000001939473677,
+      "seed": 1138159
+    },
+    {
+      "repetition": 0,
+      "r": 1124,
+      "sample_error": 0.0032181697932040813,
+      "sample_fluctuation": 0.0032181692494175997,
+      "expectation_bias": 9.639017790135789e-09,
+      "eta_pair_sum": 0.00020497528375758815,
+      "pair_scale": 1.0000000840297303,
+      "raw_l1_norm_total": 1.000000196729771,
+      "seed": 1134123
+    },
+    {
+      "repetition": 0,
+      "r": 1126,
+      "sample_error": 0.0006043567238821877,
+      "sample_fluctuation": 0.0006043563492242204,
+      "expectation_bias": 9.570711094616509e-09,
+      "eta_pair_sum": 0.00020424362873549385,
+      "pair_scale": 1.0000000834309164,
+      "raw_l1_norm_total": 1.000000195332377,
+      "seed": 1136141
+    },
+    {
+      "repetition": 0,
+      "r": 1125,
+      "sample_error": 0.001983392503618977,
+      "sample_fluctuation": 0.0019833918672262922,
+      "expectation_bias": 9.604738230340472e-09,
+      "eta_pair_sum": 0.0002046089657064472,
+      "pair_scale": 1.0000000837296543,
+      "raw_l1_norm_total": 1.0000001960295175,
+      "seed": 1135132
+    }
+  ]
+}
