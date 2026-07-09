@@ -1,0 +1,209 @@
+{
+  "eps_scan": {
+    "4": [
+      {
+        "active_constraint": "expected_precision",
+        "bias": 0.0009892822856158064,
+        "expected_cnot": 3108.0,
+        "expected_comp_weight": 0.0,
+        "expected_gates": 5180.0,
+        "expected_rz": 2072.0,
+        "max_cnot": 3108.0,
+        "max_comp_weight": 0,
+        "max_gates": 5180.0,
+        "max_rz": 2072.0,
+        "method": "S2",
+        "norm_overhead": 1.0,
+        "r_1_norm": 1,
+        "r_precision": 129,
+        "repetitions": 1000000.0,
+        "scan_value": 0.001,
+        "steps": 129,
+        "x": 0.007751937984496124
+      },
+      {
+        "active_constraint": "expected_precision",
+        "bias": 0.0005208643751637611,
+        "expected_cnot": 588.0,
+        "expected_comp_weight": 0.0,
+        "expected_gates": 980.0,
+        "expected_rz": 392.0,
+        "max_cnot": 588.0,
+        "max_comp_weight": 0,
+        "max_gates": 980.0,
+        "max_rz": 392.0,
+        "method": "RE2-3",
+        "norm_overhead": 1.3333333333333341,
+        "r_1_norm": 1,
+        "r_precision": 4,
+        "repetitions": 5333333.33333334,
+        "scan_value": 0.001,
+        "steps": 4,
+        "x": 0.041666666666666664
+      },
+      {
+        "active_constraint": "expected_precision",
+        "bias": 0.000963061968736824,
+        "expected_cnot": 615.187415730337,
+        "expected_comp_weight": 2.8305272255834035,
+        "expected_gates": 979.187415730337,
+        "expected_rz": 364.0,
+        "max_cnot": 676.0,
+        "max_comp_weight": 4,
+        "max_gates": 1040.0,
+        "max_rz": 364.0,
+        "method": "NCC2",
+        "norm_overhead": 1.004391263346904,
+        "r_1_norm": 6,
+        "r_precision": 13,
+        "repetitions": 1017681.0916324775,
+        "scan_value": 0.001,
+        "steps": 13,
+        "x": 0.07692307692307693
+      },
+      {
+        "active_constraint": "expected_precision",
+        "bias": 0.0007000324614736448,
+        "expected_cnot": 360.5642237625626,
+        "expected_comp_weight": 0.04365955160878542,
+        "expected_gates": 600.7187073973691,
+        "expected_rz": 240.15448363480652,
+        "max_cnot": 480.0,
+        "max_comp_weight": 8,
+        "max_gates": 740.0,
+        "max_rz": 260.0,
+        "method": "HNCC2",
+        "norm_overhead": 1.124000472600607,
+        "r_1_norm": 7,
+        "r_precision": 10,
+        "repetitions": 1263377.0624063879,
+        "scan_value": 0.001,
+        "steps": 10,
+        "x": 0.1
+      }
+    ]
+  },
+  "metadata": {
+    "eps": [
+      0.001
+    ],
+    "expected_precision_file": "r_for_expected_precision_N4.json",
+    "extrap_bases": [
+      2
+    ],
+    "fixed_eps": 0.001,
+    "hncc_orders": [
+      2
+    ],
+    "n_values": [
+      4
+    ],
+    "ncc_orders": [
+      2
+    ],
+    "num_x": 8,
+    "one_norm_file": "r_for_1_norm_N4_cap_e.json",
+    "orders": [
+      2
+    ],
+    "q0_by_order": {
+      "2": 6
+    },
+    "s0_by_order": {
+      "2": 6
+    },
+    "sampling_overhead_cap": 2.718281828459045,
+    "scan": "both",
+    "source": "split_constraints",
+    "time": 1.0,
+    "time_values": [
+      0.5
+    ],
+    "x_max": 1.0,
+    "x_min": 0.001
+  },
+  "time_scan": {
+    "0.5": [
+      {
+        "active_constraint": "expected_precision",
+        "bias": 0.0009723303940688216,
+        "expected_cnot": 1116.0,
+        "expected_comp_weight": 0.0,
+        "expected_gates": 1860.0,
+        "expected_rz": 744.0,
+        "max_cnot": 1116.0,
+        "max_comp_weight": 0,
+        "max_gates": 1860.0,
+        "max_rz": 744.0,
+        "method": "S2",
+        "norm_overhead": 1.0,
+        "r_1_norm": 1,
+        "r_precision": 46,
+        "repetitions": 1000000.0,
+        "scan_value": 0.5,
+        "steps": 46,
+        "x": 0.010869565217391304
+      },
+      {
+        "active_constraint": "expected_precision",
+        "bias": 0.00016247067940281212,
+        "expected_cnot": 300.0,
+        "expected_comp_weight": 0.0,
+        "expected_gates": 500.0,
+        "expected_rz": 200.0,
+        "max_cnot": 300.0,
+        "max_comp_weight": 0,
+        "max_gates": 500.0,
+        "max_rz": 200.0,
+        "method": "RE2-3",
+        "norm_overhead": 1.3333333333333341,
+        "r_1_norm": 1,
+        "r_precision": 2,
+        "repetitions": 5333333.33333334,
+        "scan_value": 0.5,
+        "steps": 2,
+        "x": 0.041666666666666664
+      },
+      {
+        "active_constraint": "expected_precision",
+        "bias": 0.0007172289718491009,
+        "expected_cnot": 283.95130269262825,
+        "expected_comp_weight": 2.8313042788595095,
+        "expected_gates": 451.95130269262825,
+        "expected_rz": 168.0,
+        "max_cnot": 312.0,
+        "max_comp_weight": 4,
+        "max_gates": 480.0,
+        "max_rz": 168.0,
+        "method": "NCC2",
+        "norm_overhead": 1.0034272722942716,
+        "r_1_norm": 3,
+        "r_precision": 6,
+        "repetitions": 1013779.7275169742,
+        "scan_value": 0.5,
+        "steps": 6,
+        "x": 0.08333333333333333
+      },
+      {
+        "active_constraint": "expected_precision",
+        "bias": 0.0003500162307368224,
+        "expected_cnot": 180.2821118812813,
+        "expected_comp_weight": 0.04365955160878542,
+        "expected_gates": 300.3593536986846,
+        "expected_rz": 120.07724181740326,
+        "max_cnot": 240.0,
+        "max_comp_weight": 8,
+        "max_gates": 370.0,
+        "max_rz": 130.0,
+        "method": "HNCC2",
+        "norm_overhead": 1.060188885341007,
+        "r_1_norm": 3,
+        "r_precision": 5,
+        "repetitions": 1124000.472600607,
+        "scan_value": 0.5,
+        "steps": 5,
+        "x": 0.1
+      }
+    ]
+  }
+}

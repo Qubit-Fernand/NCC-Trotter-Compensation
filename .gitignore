@@ -26,10 +26,13 @@ data_Ising/
 logs/
 bohr*/
 .bohrium/
+.bohr/
 .claude/
 .venv/
 .codex
+/cache/*
 /codex_memory.md
+/tmp/
 
 *.log
 *.out

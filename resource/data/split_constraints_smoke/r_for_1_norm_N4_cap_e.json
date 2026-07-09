@@ -1,0 +1,104 @@
+{
+  "metadata": {
+    "constraint": "one_norm",
+    "extrap_bases": [
+      2
+    ],
+    "hncc_orders": [
+      2
+    ],
+    "n_values": [
+      4
+    ],
+    "ncc_orders": [
+      2
+    ],
+    "num_x": 8,
+    "orders": [
+      2
+    ],
+    "q0_by_order": {
+      "2": 6
+    },
+    "s0_by_order": {
+      "2": 6
+    },
+    "sampling_overhead_cap": 2.718281828459045,
+    "time": 1.0,
+    "time_values": [
+      0.5
+    ],
+    "x_max": 1.0,
+    "x_min": 0.001
+  },
+  "norm_scan": {
+    "0.5": [
+      {
+        "method": "S2",
+        "norm_overhead_at_r_1_norm": 1.0,
+        "r_1_norm": 1,
+        "sampling_overhead_cap": 2.718281828459045,
+        "time": 0.5,
+        "x_1_norm": 0.5
+      },
+      {
+        "method": "RE2-3",
+        "norm_overhead_at_r_1_norm": 1.3333333333333341,
+        "r_1_norm": 1,
+        "sampling_overhead_cap": 2.718281828459045,
+        "time": 0.5,
+        "x_1_norm": 0.08333333333333333
+      },
+      {
+        "method": "NCC2",
+        "norm_overhead_at_r_1_norm": 1.206266541367284,
+        "r_1_norm": 3,
+        "sampling_overhead_cap": 2.718281828459045,
+        "time": 0.5,
+        "x_1_norm": 0.16666666666666666
+      },
+      {
+        "method": "HNCC2",
+        "norm_overhead_at_r_1_norm": 2.6024248902802554,
+        "r_1_norm": 3,
+        "sampling_overhead_cap": 2.718281828459045,
+        "time": 0.5,
+        "x_1_norm": 0.16666666666666666
+      }
+    ],
+    "1.0": [
+      {
+        "method": "S2",
+        "norm_overhead_at_r_1_norm": 1.0,
+        "r_1_norm": 1,
+        "sampling_overhead_cap": 2.718281828459045,
+        "time": 1.0,
+        "x_1_norm": 1.0
+      },
+      {
+        "method": "RE2-3",
+        "norm_overhead_at_r_1_norm": 1.3333333333333341,
+        "r_1_norm": 1,
+        "sampling_overhead_cap": 2.718281828459045,
+        "time": 1.0,
+        "x_1_norm": 0.16666666666666666
+      },
+      {
+        "method": "NCC2",
+        "norm_overhead_at_r_1_norm": 1.4550789688221895,
+        "r_1_norm": 6,
+        "sampling_overhead_cap": 2.718281828459045,
+        "time": 1.0,
+        "x_1_norm": 0.16666666666666666
+      },
+      {
+        "method": "HNCC2",
+        "norm_overhead_at_r_1_norm": 2.321837164864375,
+        "r_1_norm": 7,
+        "sampling_overhead_cap": 2.718281828459045,
+        "time": 1.0,
+        "x_1_norm": 0.14285714285714285
+      }
+    ]
+  }
+}

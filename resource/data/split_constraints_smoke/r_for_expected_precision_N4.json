@@ -1,0 +1,118 @@
+{
+  "eps_scan": {
+    "4": [
+      {
+        "bias_precision": 0.0009892822856158064,
+        "eps": 0.001,
+        "method": "S2",
+        "r_precision": 129,
+        "scan_value": 0.001,
+        "time": 1.0,
+        "x_precision": 0.007751937984496124
+      },
+      {
+        "bias_precision": 0.0005208643751637611,
+        "eps": 0.001,
+        "method": "RE2-3",
+        "r_precision": 4,
+        "scan_value": 0.001,
+        "time": 1.0,
+        "x_precision": 0.041666666666666664
+      },
+      {
+        "bias_precision": 0.000963061968736824,
+        "eps": 0.001,
+        "method": "NCC2",
+        "r_precision": 13,
+        "scan_value": 0.001,
+        "time": 1.0,
+        "x_precision": 0.07692307692307693
+      },
+      {
+        "bias_precision": 0.0007000324614736448,
+        "eps": 0.001,
+        "method": "HNCC2",
+        "r_precision": 10,
+        "scan_value": 0.001,
+        "time": 1.0,
+        "x_precision": 0.1
+      }
+    ]
+  },
+  "metadata": {
+    "constraint": "expected_precision",
+    "eps": [
+      0.001
+    ],
+    "extrap_bases": [
+      2
+    ],
+    "fixed_eps": 0.001,
+    "hncc_orders": [
+      2
+    ],
+    "n_values": [
+      4
+    ],
+    "ncc_orders": [
+      2
+    ],
+    "num_x": 8,
+    "orders": [
+      2
+    ],
+    "q0_by_order": {
+      "2": 6
+    },
+    "s0_by_order": {
+      "2": 6
+    },
+    "scan": "both",
+    "time": 1.0,
+    "time_values": [
+      0.5
+    ],
+    "x_max": 1.0,
+    "x_min": 0.001
+  },
+  "time_scan": {
+    "0.5": [
+      {
+        "bias_precision": 0.0009723303940688216,
+        "eps": 0.001,
+        "method": "S2",
+        "r_precision": 46,
+        "scan_value": 0.5,
+        "time": 0.5,
+        "x_precision": 0.010869565217391304
+      },
+      {
+        "bias_precision": 0.00016247067940281212,
+        "eps": 0.001,
+        "method": "RE2-3",
+        "r_precision": 2,
+        "scan_value": 0.5,
+        "time": 0.5,
+        "x_precision": 0.041666666666666664
+      },
+      {
+        "bias_precision": 0.0007172289718491009,
+        "eps": 0.001,
+        "method": "NCC2",
+        "r_precision": 6,
+        "scan_value": 0.5,
+        "time": 0.5,
+        "x_precision": 0.08333333333333333
+      },
+      {
+        "bias_precision": 0.0003500162307368224,
+        "eps": 0.001,
+        "method": "HNCC2",
+        "r_precision": 5,
+        "scan_value": 0.5,
+        "time": 0.5,
+        "x_precision": 0.1
+      }
+    ]
+  }
+}

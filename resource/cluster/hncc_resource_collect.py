@@ -42,13 +42,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eps", nargs="+", type=float, default=[1e-3, 8e-4, 6e-4, 4e-4, 3e-4, 2e-4, 1e-4], help="Target precisions.")
     parser.add_argument("--time-values", nargs="+", type=float, default=[0.25, 0.35, 0.5, 0.7, 1.0, 1.4, 2.0, 2.8, 4.0], help="Times for time scan.")
     parser.add_argument("--fixed-eps", type=float, default=1e-3, help="Precision for time scan.")
-    parser.add_argument("--sampling-overhead-cap", type=float, default=1.75, help="Maximum accumulated compensation 1-norm lambda^nu.")
+    parser.add_argument("--sampling-overhead-cap", type=float, default=math.e, help="Maximum accumulated compensation 1-norm lambda^nu.")
     parser.add_argument("--x-min", type=float, default=1e-3, help="Minimum step size in interpolation grid.")
     parser.add_argument("--x-max", type=float, default=1.0, help="Maximum step size in interpolation grid.")
     parser.add_argument("--num-x", type=int, default=40, help="Number of interpolation-grid points.")
     parser.add_argument("--scan", choices=("eps", "time", "both"), default="both", help="Which scans to collect.")
     parser.add_argument("--data-dir", type=Path, default=Path("resource/data"), help="Output data directory.")
-    parser.add_argument("--output", type=Path, default=None, help="Output JSON path. Defaults to DATA_DIR/hncc_resource_data.json.")
+    parser.add_argument("--output", type=Path, default=None, help="Output JSON path. Defaults to DATA_DIR/hncc_resource_data_N8_cap_1.75.json.")
     return parser.parse_args()
 
 
@@ -150,7 +150,7 @@ def main() -> None:
         payload["time_scan"] = time_scan
 
     args.data_dir.mkdir(parents=True, exist_ok=True)
-    output = args.output if args.output is not None else args.data_dir / "hncc_resource_data.json"
+    output = args.output if args.output is not None else args.data_dir / "hncc_resource_data_N8_cap_1.75.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"Saved {output}")

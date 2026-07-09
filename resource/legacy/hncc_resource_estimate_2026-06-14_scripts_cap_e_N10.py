@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Finite-size HNCC resource estimates from exact Pauli decompositions.
 
-The script uses sparse Pauli-string algebra and a translation-cached connected
-cluster formal log to compute the truncated Pauli decomposition of the Trotter
-remainder for periodic 1D Heisenberg chains.  It then converts that explicit
-Pauli representation into the LCQC normalization used by the HNCC compensation
-step and compares resource estimates for
+The script uses sparse Pauli-string algebra to compute the truncated Pauli
+decomposition of the Trotter remainder for periodic 1D Heisenberg chains.  It
+then converts that explicit Pauli representation into the LCQC normalization
+used by the HNCC compensation step and compares resource estimates for
 
   * plain Suzuki-Trotter formulas S2, S4, S6,
   * unitary-level NCC compensation of S2,
@@ -27,10 +26,9 @@ from __future__ import annotations
 import argparse
 import itertools
 import math
-import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, FrozenSet, Iterable, List, Mapping, MutableMapping, Sequence, Tuple
+from typing import Dict, Iterable, List, Mapping, MutableMapping, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -41,7 +39,6 @@ PauliOp = Dict[PauliString, complex]
 PauliPoly = Dict[int, PauliOp]
 Layer = Tuple[str, float]
 EighData = Tuple[np.ndarray, np.ndarray]
-Cluster = FrozenSet[int]
 
 PAULI_MATS = (
     np.array([[1, 0], [0, 1]], dtype=complex),
@@ -263,159 +260,12 @@ def remainder_bases(a_op: PauliOp, b_op: PauliOp, formula_order: int) -> List[Pa
     return bases
 
 
-def full_system_remainder_log_pauli_poly(
-    a_op: PauliOp,
-    b_op: PauliOp,
-    formula_order: int,
-    qmax: int,
-    n_qubits: int,
-) -> PauliPoly:
-    """Full-system formal Pauli-algebra log through order qmax."""
+def remainder_log_pauli_poly(a_op: PauliOp, b_op: PauliOp, formula_order: int, qmax: int, n_qubits: int) -> PauliPoly:
+    """Formal Pauli-algebra log of U(x) S_order(x)^dagger through order qmax."""
     prod: PauliPoly = {0: op_identity(n_qubits)}
     for base in remainder_bases(a_op, b_op, formula_order):
         prod = poly_mul(prod, exp_poly_from_order1(base, qmax, n_qubits), qmax)
     return log_poly_near_identity(prod, qmax, n_qubits)
-
-
-@dataclass
-class ClusterResult:
-    connected: PauliPoly
-
-
-def pauli_support(pauli: PauliString) -> Cluster:
-    return frozenset(idx for idx, label in enumerate(pauli) if label != 0)
-
-
-def restrict_op_to_cluster(op: Mapping[PauliString, complex], cluster: Cluster) -> PauliOp:
-    return {pauli: coeff for pauli, coeff in op.items() if pauli_support(pauli).issubset(cluster)}
-
-
-def cyclic_interval(start: int, length: int, n_qubits: int) -> Cluster:
-    if length == n_qubits:
-        return frozenset(range(n_qubits))
-    return frozenset((start + offset) % n_qubits for offset in range(length))
-
-
-def poly_subtract(target: PauliPoly, source: PauliPoly, qmax: int) -> PauliPoly:
-    return poly_add(target, source, scale_b=-1.0, qmax=qmax)
-
-
-def poly_accumulate(target: PauliPoly, source: PauliPoly, qmax: int) -> PauliPoly:
-    return poly_add(target, source, qmax=qmax)
-
-
-def translate_pauli(pauli: PauliString, shift: int) -> PauliString:
-    n_qubits = len(pauli)
-    out = [0] * n_qubits
-    for site, label in enumerate(pauli):
-        out[(site + shift) % n_qubits] = label
-    return tuple(out)
-
-
-def translate_op(op: Mapping[PauliString, complex], shift: int) -> PauliOp:
-    if not op:
-        return {}
-    n_qubits = len(next(iter(op)))
-    shift %= n_qubits
-    if shift == 0:
-        return dict(op)
-    out: PauliOp = {}
-    for pauli, coeff in op.items():
-        translated = translate_pauli(pauli, shift)
-        out[translated] = out.get(translated, 0.0) + coeff
-    return clean_op(out)
-
-
-def translate_poly(poly: PauliPoly, shift: int) -> PauliPoly:
-    return {order: translate_op(op, shift) for order, op in poly.items()}
-
-
-def connected_cluster_remainder_log_pauli_poly(
-    a_op: PauliOp,
-    b_op: PauliOp,
-    formula_order: int,
-    qmax: int,
-    n_qubits: int,
-) -> Tuple[PauliPoly, int]:
-    """Connected-interval cluster expansion for the BCH/log remainder.
-
-    The implementation is specialized to the periodic 1D nearest-neighbor
-    Heisenberg benchmark.  For a q-fold connected term, the support fits in a
-    cyclic interval of length at most q+1.  Even-odd product-formula groupings
-    are invariant under translations by two sites, so each interval length has
-    at most two representatives.
-    """
-    max_cluster_length = min(n_qubits, qmax + 1)
-    representatives: Dict[Tuple[int, int | None], ClusterResult] = {}
-    total_connected: PauliPoly = {}
-
-    for length in range(1, max_cluster_length + 1):
-        parity_options: Sequence[int | None] = (None,) if length == n_qubits else (0, 1)
-        for parity in parity_options:
-            start = 0 if parity is None else parity
-            cluster = cyclic_interval(start, length, n_qubits)
-            local_a = restrict_op_to_cluster(a_op, cluster)
-            local_b = restrict_op_to_cluster(b_op, cluster)
-            omega = full_system_remainder_log_pauli_poly(local_a, local_b, formula_order, qmax, n_qubits)
-            connected = {order: dict(op) for order, op in omega.items()}
-
-            if length == n_qubits:
-                for sub_length in range(1, n_qubits):
-                    for sub_start in range(n_qubits):
-                        sub_parity = sub_start % 2
-                        sub_connected = representatives[(sub_length, sub_parity)].connected
-                        connected = poly_subtract(
-                            connected,
-                            translate_poly(sub_connected, sub_start - sub_parity),
-                            qmax,
-                        )
-            else:
-                for sub_length in range(1, length):
-                    for offset in range(length - sub_length + 1):
-                        sub_start = (start + offset) % n_qubits
-                        sub_parity = sub_start % 2
-                        sub_connected = representatives[(sub_length, sub_parity)].connected
-                        connected = poly_subtract(
-                            connected,
-                            translate_poly(sub_connected, sub_start - sub_parity),
-                            qmax,
-                        )
-
-            representatives[(length, parity)] = ClusterResult(connected=connected)
-
-            if length == n_qubits:
-                total_connected = poly_accumulate(total_connected, connected, qmax)
-            else:
-                assert parity is not None
-                for target_start in range(parity, n_qubits, 2):
-                    total_connected = poly_accumulate(
-                        total_connected,
-                        translate_poly(connected, target_start - parity),
-                        qmax,
-                    )
-
-    return total_connected, len(representatives)
-
-
-def remainder_log_pauli_poly(
-    a_op: PauliOp,
-    b_op: PauliOp,
-    formula_order: int,
-    qmax: int,
-    n_qubits: int,
-) -> PauliPoly:
-    """Default BCH/log backend: translation-cached connected clusters."""
-    start = time.perf_counter()
-    omega_poly, representative_count = connected_cluster_remainder_log_pauli_poly(
-        a_op,
-        b_op,
-        formula_order,
-        qmax,
-        n_qubits,
-    )
-    elapsed = time.perf_counter() - start
-    print(f"  cluster formal log: representatives={representative_count}, elapsed={elapsed:.3f}s")
-    return omega_poly
 
 
 def pauli_matrix(p: PauliString) -> np.ndarray:
@@ -648,6 +498,7 @@ def one_step_formula_gate_cost(layers: Sequence[Layer], a_cost: GateCost, b_cost
 
 @dataclass
 class PauliWeightStats:
+    total_weight: float
     expected_pauli_weight: float
     max_pauli_weight: int
     expected_cnot: float
@@ -685,8 +536,9 @@ def weighted_pauli_stats(
             max_cnot = max(max_cnot, cnot)
             max_rz = max(max_rz, rz)
     if total == 0:
-        return PauliWeightStats(0.0, 0, 0.0, 0, 0.0, 0)
+        return PauliWeightStats(0.0, 0.0, 0, 0.0, 0, 0.0, 0)
     return PauliWeightStats(
+        total_weight=total,
         expected_pauli_weight=weight_sum / total,
         max_pauli_weight=max_weight,
         expected_cnot=cnot_sum / total,
@@ -698,6 +550,7 @@ def weighted_pauli_stats(
 
 @dataclass
 class CorrectionGateStats:
+    lambda_step: float
     expected_pauli_weight: float
     max_pauli_weight: int
     expected_cnot: float
@@ -721,7 +574,9 @@ def ncc_unitary_step_lambda(norms: Mapping[int, float], lead_order: int, q0: int
 def ncc_correction_gate_stats(comp: "NccData", x: float) -> CorrectionGateStats:
     orders = range(comp.lead_order, comp.q0 + 1)
     stats = weighted_pauli_stats(comp.omega_poly, orders, x, controlled=True)
+    lambda_step = ncc_unitary_step_lambda(comp.norms, comp.lead_order, comp.q0, x)
     return CorrectionGateStats(
+        lambda_step=lambda_step,
         expected_pauli_weight=stats.expected_pauli_weight,
         max_pauli_weight=stats.max_pauli_weight,
         expected_cnot=stats.expected_cnot,
@@ -780,7 +635,7 @@ def correction_gate_stats(comp: "HnccData", x: float) -> CorrectionGateStats:
     expected_cnot = sum(w * c for w, c in zip(branch_weights, branch_expected_cnot)) / lambda_step
     expected_rz = sum(w * r for w, r in zip(branch_weights, branch_expected_rz)) / lambda_step
     expected_weight = sum(w * wt for w, wt in zip(branch_weights, branch_expected_weight)) / lambda_step
-    return CorrectionGateStats(expected_weight, max_weight, expected_cnot, max_cnot, expected_rz, max_rz)
+    return CorrectionGateStats(lambda_step, expected_weight, max_weight, expected_cnot, max_cnot, expected_rz, max_rz)
 
 
 @dataclass(frozen=True)
@@ -874,6 +729,7 @@ class NccData:
 @dataclass
 class EstimateResult:
     n: int
+    gamma: int
     a_op: PauliOp
     b_op: PauliOp
     a_eigh: EighData
@@ -1097,6 +953,7 @@ def build_estimate(
 
     return EstimateResult(
         n=n,
+        gamma=gamma,
         a_op=a_op,
         b_op=b_op,
         a_eigh=a_eigh,
@@ -1239,7 +1096,7 @@ def print_rows(title: str, rows: Sequence[ResourceRow]) -> None:
     print(f"\n=== {title} ===")
     header = (
         "scan       method    steps       x          bias       norm/||a|| "
-        "max CNOT   max Rz     repetitions  E[Wc] maxW"
+        "E[gates]   max gates  repetitions  E[Wc] maxW"
     )
     print(header)
     print("-" * len(header))
@@ -1247,9 +1104,90 @@ def print_rows(title: str, rows: Sequence[ResourceRow]) -> None:
         print(
             f"{row.scan_value:<10.3g} {row.method:<8} {row.steps:<10d} {row.x:<10.4g} "
             f"{row.bias:<10.3e} {row.norm_overhead:<10.3g} "
-            f"{row.max_cnot:<10.3g} {row.max_rz:<10.3g} {row.repetitions:<11.3g} "
+            f"{row.expected_gates:<10.3g} {row.max_gates:<10.3g} {row.repetitions:<11.3g} "
             f"{row.expected_comp_weight:<5.2f} {row.max_comp_weight:<4d}"
         )
+
+
+def make_gate_plot(
+    all_rows: Mapping[int, Sequence[ResourceRow]],
+    eps_values: Sequence[float],
+    time: float,
+    out_dir: Path,
+) -> None:
+    fig, ax = plt.subplots(figsize=(5.0, 4.6))
+    eps_sorted = np.array(sorted(eps_values), dtype=float)
+    for n, rows in all_rows.items():
+        methods = sorted({row.method for row in rows}, key=method_sort_key)
+        by_method = {method: {row.scan_value: row for row in rows if row.method == method} for method in methods}
+        for method in methods:
+            values = np.array([by_method[method][eps].expected_gates for eps in eps_sorted])
+            ax.loglog(
+                eps_sorted,
+                values,
+                marker_for_method(method),
+                ms=3,
+                label=f"N={n} {method}",
+                **line_style_for_method(method),
+            )
+    ax.set_xlabel(r"Target precision $\epsilon$")
+    ax.set_ylabel(r"Total gates $N_{\rm CNOT}+N_{R_z}$")
+    ax.invert_xaxis()
+    ax.grid(True, which="both", ls=":", lw=0.5)
+    handles, labels = ax.get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=3, fontsize=8)
+    fig.tight_layout(rect=(0.0, 0.24, 1.0, 1.0))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "hncc_resource_gate_counts.pdf"
+    fig.savefig(path)
+    plt.close(fig)
+    print(f"Saved {path}")
+
+
+def make_repetition_plot(
+    all_rows: Mapping[int, Sequence[ResourceRow]],
+    eps_values: Sequence[float],
+    time: float,
+    out_dir: Path,
+) -> None:
+    fig, ax = plt.subplots(figsize=(5.0, 4.6))
+    eps_sorted = np.array(sorted(eps_values), dtype=float)
+    for n, rows in all_rows.items():
+        methods = sorted({repetition_display_method(row.method) for row in rows}, key=method_sort_key)
+        by_method: Dict[str, Dict[float, ResourceRow]] = {method: {} for method in methods}
+        for row in rows:
+            method = repetition_display_method(row.method)
+            by_method[method].setdefault(row.scan_value, row)
+        for method in methods:
+            values = np.array([by_method[method][eps].repetitions for eps in eps_sorted])
+            ax.loglog(
+                eps_sorted,
+                values,
+                marker_for_method(method),
+                ms=3,
+                label=f"N={n} {method}",
+                **line_style_for_method(method),
+            )
+    ax.set_xlabel(r"Target precision $\epsilon$")
+    ax.set_ylabel("Classical repetitions")
+    ax.invert_xaxis()
+    ax.grid(True, which="both", ls=":", lw=0.5)
+    handles, labels = ax.get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=3, fontsize=8)
+    fig.tight_layout(rect=(0.0, 0.24, 1.0, 1.0))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "hncc_resource_repetitions.pdf"
+    fig.savefig(path)
+    plt.close(fig)
+    print(f"Saved {path}")
+
+
+def gate_metric_value(row: ResourceRow) -> float:
+    return row.max_gates
+
+
+def gate_metric_label() -> str:
+    return r"Max gates per run $N_{\rm CNOT}+N_{R_z}$"
 
 
 def unique_legend(axs: Sequence[plt.Axes]) -> Tuple[List[object], List[str]]:
@@ -1264,27 +1202,19 @@ def unique_legend(axs: Sequence[plt.Axes]) -> Tuple[List[object], List[str]]:
 def make_eps_tradeoff_plot(
     all_rows: Mapping[int, Sequence[ResourceRow]],
     eps_values: Sequence[float],
+    time: float,
     out_dir: Path,
 ) -> None:
-    fig, (ax_cnot, ax_rz, ax_rep) = plt.subplots(1, 3, figsize=(10.8, 3.2))
+    fig, (ax_g, ax_r) = plt.subplots(1, 2, figsize=(7.4, 4.4))
     eps_sorted = np.array(sorted(eps_values), dtype=float)
     for n, rows in all_rows.items():
         gate_methods = sorted({row.method for row in rows}, key=method_sort_key)
         gate_by_method = {method: {row.scan_value: row for row in rows if row.method == method} for method in gate_methods}
         for method in gate_methods:
-            cnot_values = np.array([gate_by_method[method][eps].max_cnot for eps in eps_sorted])
-            rz_values = np.array([gate_by_method[method][eps].max_rz for eps in eps_sorted])
-            ax_cnot.loglog(
+            values = np.array([gate_metric_value(gate_by_method[method][eps]) for eps in eps_sorted])
+            ax_g.loglog(
                 eps_sorted,
-                cnot_values,
-                marker_for_method(method),
-                ms=3.4,
-                label=f"N={n} {method}",
-                **line_style_for_method(method),
-            )
-            ax_rz.loglog(
-                eps_sorted,
-                rz_values,
+                values,
                 marker_for_method(method),
                 ms=3.4,
                 label=f"N={n} {method}",
@@ -1298,7 +1228,7 @@ def make_eps_tradeoff_plot(
             rep_by_method[method].setdefault(row.scan_value, row)
         for method in rep_methods:
             values = np.array([rep_by_method[method][eps].repetitions * eps**2 for eps in eps_sorted])
-            ax_rep.semilogx(
+            ax_r.semilogx(
                 eps_sorted,
                 values,
                 marker_for_method(method),
@@ -1307,32 +1237,17 @@ def make_eps_tradeoff_plot(
                 **line_style_for_method(method),
             )
 
-    ax_cnot.set_ylabel(r"Max CNOT gates per run")
-    ax_rz.set_ylabel(r"Max $R_z$ gates per run")
-    ax_rep.set_ylabel(r"Repetition overhead $N_{\rm rep}\epsilon^2$")
-    for ax in (ax_cnot, ax_rz, ax_rep):
-        ax.set_xlabel(r"Target precision $\epsilon$")
+    ax_g.set_xlabel(r"Target precision $\epsilon$")
+    ax_r.set_xlabel(r"Target precision $\epsilon$")
+    ax_g.set_ylabel(gate_metric_label())
+    ax_r.set_ylabel(r"Repetition overhead $N_{\rm rep}\epsilon^2$")
+    for ax in (ax_g, ax_r):
         ax.invert_xaxis()
         ax.grid(True, which="both", ls=":", lw=0.5)
-        ax.tick_params(axis="both", labelsize=8.5)
-        ax.xaxis.label.set_size(10)
-        ax.yaxis.label.set_size(10)
-        ax.set_box_aspect(0.72)
-    handles, labels = unique_legend((ax_cnot, ax_rz, ax_rep))
-    fig.legend(
-        handles,
-        labels,
-        loc="lower center",
-        bbox_to_anchor=(0.5, 0.015),
-        ncol=len(labels),
-        fontsize=8.5,
-        frameon=False,
-        handlelength=1.35,
-        handletextpad=0.35,
-        columnspacing=0.7,
-        borderaxespad=0.0,
-    )
-    fig.tight_layout(rect=(0.0, 0.13, 1.0, 1.0), w_pad=0.5)
+        ax.set_box_aspect(1)
+    handles, labels = unique_legend((ax_g, ax_r))
+    fig.legend(handles, labels, loc="lower center", ncol=4, fontsize=8)
+    fig.tight_layout(rect=(0.0, 0.22, 1.0, 1.0))
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / "hncc_resource_tradeoff_vs_eps.pdf"
     fig.savefig(path)
@@ -1341,6 +1256,7 @@ def make_eps_tradeoff_plot(
 
 
 def make_time_tradeoff_plot(
+    result: EstimateResult,
     time_rows: Mapping[float, Sequence[ResourceRow]],
     fixed_eps: float,
     out_dir: Path,
@@ -1352,25 +1268,15 @@ def make_time_tradeoff_plot(
         key=method_sort_key,
     )
 
-    fig, (ax_cnot, ax_rz, ax_rep) = plt.subplots(1, 3, figsize=(10.8, 3.2))
+    fig, (ax_g, ax_r) = plt.subplots(1, 2, figsize=(7.4, 4.4))
     for method in gate_methods:
-        cnot_values = []
-        rz_values = []
+        values = []
         for time in times:
             row = next(row for row in time_rows[float(time)] if row.method == method)
-            cnot_values.append(row.max_cnot)
-            rz_values.append(row.max_rz)
-        ax_cnot.loglog(
+            values.append(gate_metric_value(row))
+        ax_g.loglog(
             times,
-            cnot_values,
-            marker_for_method(method),
-            ms=3.4,
-            label=method,
-            **line_style_for_method(method),
-        )
-        ax_rz.loglog(
-            times,
-            rz_values,
+            values,
             marker_for_method(method),
             ms=3.4,
             label=method,
@@ -1386,7 +1292,7 @@ def make_time_tradeoff_plot(
                 if repetition_display_method(row.method) == method
             )
             values.append(row.repetitions * fixed_eps**2)
-        ax_rep.semilogx(
+        ax_r.semilogx(
             times,
             values,
             marker_for_method(method),
@@ -1395,36 +1301,72 @@ def make_time_tradeoff_plot(
             **line_style_for_method(method),
         )
 
-    ax_cnot.set_ylabel(r"Max CNOT gates per run")
-    ax_rz.set_ylabel(r"Max $R_z$ gates per run")
-    ax_rep.set_ylabel(r"Repetition overhead $N_{\rm rep}\epsilon^2$")
-    for ax in (ax_cnot, ax_rz, ax_rep):
-        ax.set_xlabel(r"Simulation time $t$")
+    ax_g.set_xlabel(r"Simulation time $t$")
+    ax_r.set_xlabel(r"Simulation time $t$")
+    ax_g.set_ylabel(gate_metric_label())
+    ax_r.set_ylabel(r"Repetition overhead $N_{\rm rep}\epsilon^2$")
+    for ax in (ax_g, ax_r):
         ax.grid(True, which="both", ls=":", lw=0.5)
-        ax.tick_params(axis="both", labelsize=8.5)
-        ax.xaxis.label.set_size(10)
-        ax.yaxis.label.set_size(10)
-        ax.set_box_aspect(0.72)
-    handles, labels = unique_legend((ax_cnot, ax_rz, ax_rep))
-    fig.legend(
-        handles,
-        labels,
-        loc="lower center",
-        bbox_to_anchor=(0.5, 0.015),
-        ncol=len(labels),
-        fontsize=8.5,
-        frameon=False,
-        handlelength=1.35,
-        handletextpad=0.35,
-        columnspacing=0.7,
-        borderaxespad=0.0,
-    )
-    fig.tight_layout(rect=(0.0, 0.13, 1.0, 1.0), w_pad=0.5)
+        ax.set_box_aspect(1)
+    handles, labels = unique_legend((ax_g, ax_r))
+    fig.legend(handles, labels, loc="lower center", ncol=4, fontsize=8)
+    fig.tight_layout(rect=(0.0, 0.22, 1.0, 1.0))
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / "hncc_resource_tradeoff_vs_t.pdf"
     fig.savefig(path)
     plt.close(fig)
     print(f"Saved {path}")
+
+
+def make_time_plots(
+    result: EstimateResult,
+    time_rows: Mapping[float, Sequence[ResourceRow]],
+    fixed_eps: float,
+    out_dir: Path,
+) -> None:
+    times = np.array(sorted(time_rows), dtype=float)
+    methods = sorted({row.method for rows in time_rows.values() for row in rows}, key=method_sort_key)
+    repetition_methods = sorted(
+        {repetition_display_method(row.method) for rows in time_rows.values() for row in rows},
+        key=method_sort_key,
+    )
+
+    fig_g, ax_g = plt.subplots(figsize=(5.0, 4.6))
+    fig_r, ax_r = plt.subplots(figsize=(5.0, 4.6))
+    for method in methods:
+        gates = []
+        for time in times:
+            row = next(row for row in time_rows[float(time)] if row.method == method)
+            gates.append(row.expected_gates)
+        ax_g.loglog(times, gates, marker_for_method(method), ms=3, label=method, **line_style_for_method(method))
+
+    for method in repetition_methods:
+        reps = []
+        for time in times:
+            row = next(
+                row
+                for row in time_rows[float(time)]
+                if repetition_display_method(row.method) == method
+            )
+            reps.append(row.repetitions)
+        ax_r.loglog(times, reps, marker_for_method(method), ms=3, label=method, **line_style_for_method(method))
+
+    for ax, ylabel in [(ax_g, r"Total gates $N_{\rm CNOT}+N_{R_z}$"), (ax_r, "Classical repetitions")]:
+        ax.set_xlabel(r"Simulation time $t$")
+        ax.set_ylabel(ylabel)
+        ax.grid(True, which="both", ls=":", lw=0.5)
+        handles, labels = ax.get_legend_handles_labels()
+        ax.figure.legend(handles, labels, loc="lower center", ncol=3, fontsize=8)
+        ax.figure.tight_layout(rect=(0.0, 0.22, 1.0, 1.0))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    gate_path = out_dir / "hncc_resource_gate_counts_vs_t.pdf"
+    rep_path = out_dir / "hncc_resource_repetitions_vs_t.pdf"
+    fig_g.savefig(gate_path)
+    fig_r.savefig(rep_path)
+    plt.close(fig_g)
+    plt.close(fig_r)
+    print(f"Saved {gate_path}")
+    print(f"Saved {rep_path}")
 
 
 def method_sort_key(method: str) -> Tuple[int, str]:
@@ -1516,7 +1458,7 @@ def parse_int_map(items: Sequence[str], defaults: Mapping[int, int]) -> Dict[int
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--N", dest="n_values", nargs="+", type=int, default=[6], help="Even system sizes.")
+    parser.add_argument("--N", dest="n_values", nargs="+", type=int, default=[10], help="Even system sizes.")
     parser.add_argument("--orders", nargs="+", type=int, default=[2, 4, 6], help="Plain Suzuki orders.")
     parser.add_argument("--ncc-orders", nargs="+", type=int, default=[2], help="Base Suzuki orders for unitary-level NCC.")
     parser.add_argument("--hncc-orders", nargs="+", type=int, default=[2], help="Base Suzuki orders to compensate.")
@@ -1528,7 +1470,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eps", nargs="+", type=float, default=[1e-3, 8e-4, 6e-4, 4e-4, 3e-4, 2e-4, 1e-4], help="Target precisions.")
     parser.add_argument("--time-values", nargs="+", type=float, default=[0.25, 0.35, 0.5, 0.7, 1.0, 1.4, 2.0, 2.8, 4.0], help="Times for time scan.")
     parser.add_argument("--fixed-eps", type=float, default=1e-3, help="Precision for time scan.")
-    parser.add_argument("--sampling-overhead-cap", type=float, default=1.75, help="Maximum accumulated compensation 1-norm lambda^nu.")
+    parser.add_argument("--sampling-overhead-cap", type=float, default=math.e, help="Maximum accumulated compensation 1-norm lambda^nu.")
     parser.add_argument("--x-min", type=float, default=1e-3, help="Minimum step size in interpolation grid.")
     parser.add_argument("--x-max", type=float, default=1.0, help="Maximum step size in interpolation grid.")
     parser.add_argument("--num-x", type=int, default=40, help="Number of interpolation-grid points.")
@@ -1583,7 +1525,7 @@ def main() -> None:
             all_rows[result.n] = rows
             print_rows(f"N={result.n}, eps scan at t={args.time:g}", rows)
         if not args.no_plots:
-            make_eps_tradeoff_plot(all_rows, args.eps, args.out_dir)
+            make_eps_tradeoff_plot(all_rows, args.eps, args.time, args.out_dir)
 
     if args.scan in ("time", "both"):
         # Keep the time-scan plot uncluttered by using the first N value.
@@ -1602,7 +1544,7 @@ def main() -> None:
             time_rows[float(time)] = rows
             print_rows(f"N={result.n}, time scan at eps={args.fixed_eps:.1e}, t={time:g}", rows)
         if not args.no_plots:
-            make_time_tradeoff_plot(time_rows, args.fixed_eps, args.out_dir)
+            make_time_tradeoff_plot(result, time_rows, args.fixed_eps, args.out_dir)
 
 
 if __name__ == "__main__":

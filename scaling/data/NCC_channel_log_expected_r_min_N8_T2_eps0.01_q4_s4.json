@@ -1,0 +1,104 @@
+{
+  "script": "NCC_channel_expected_r_min_cached.py",
+  "mode": "log",
+  "params": {
+    "N": 8,
+    "J": 1.0,
+    "h": 1.0,
+    "T": 2.0,
+    "epsilon": 0.01,
+    "requested_repeats": 10,
+    "base_seed": 7,
+    "r_max": 4096,
+    "s0": 4,
+    "q0": 4
+  },
+  "expected_r_min": 32,
+  "expectation_bias_at_min": 0.015661874100732012,
+  "searches": [
+    {
+      "r": 1,
+      "expectation_bias": 1035.90453120407,
+      "worst_index": 1,
+      "eta_pair_sum": 3583.999999999999,
+      "pair_scale": 7168.000069754063,
+      "raw_l1_norm_total": 187050.66673642074
+    },
+    {
+      "r": 2,
+      "expectation_bias": 3972.957000636563,
+      "worst_index": 1,
+      "eta_pair_sum": 479.9999999999999,
+      "pair_scale": 960.0005208332376,
+      "raw_l1_norm_total": 12202.667187499905
+    },
+    {
+      "r": 4,
+      "expectation_bias": 148.49262501379926,
+      "worst_index": 1,
+      "eta_pair_sum": 67.99999999999999,
+      "pair_scale": 136.0036764208966,
+      "raw_l1_norm_total": 838.6703430875633
+    },
+    {
+      "r": 8,
+      "expectation_bias": 0.3924326287955427,
+      "worst_index": 1,
+      "eta_pair_sum": 10.499999999999998,
+      "pair_scale": 21.02379604162858,
+      "raw_l1_norm_total": 64.94046270829526
+    },
+    {
+      "r": 16,
+      "expectation_bias": 0.02193289565038262,
+      "worst_index": 1,
+      "eta_pair_sum": 1.8124999999999998,
+      "pair_scale": 3.7604022391228296,
+      "raw_l1_norm_total": 6.505193905789497
+    },
+    {
+      "r": 32,
+      "expectation_bias": 0.015661874100732012,
+      "worst_index": 85,
+      "eta_pair_sum": 0.3515625,
+      "pair_scale": 1.2224503121292905,
+      "raw_l1_norm_total": 1.393999791295957
+    },
+    {
+      "r": 24,
+      "expectation_bias": 0.023276865109875092,
+      "worst_index": 3,
+      "eta_pair_sum": 0.685185185185185,
+      "pair_scale": 1.6964418504590795,
+      "raw_l1_norm_total": 2.2386229204179275
+    },
+    {
+      "r": 28,
+      "expectation_bias": 0.02387791830544011,
+      "worst_index": 43,
+      "eta_pair_sum": 0.47813411078717194,
+      "pair_scale": 1.3836361196474158,
+      "raw_l1_norm_total": 1.676291957492758
+    },
+    {
+      "r": 30,
+      "expectation_bias": 0.02039088763299334,
+      "worst_index": 85,
+      "eta_pair_sum": 0.4077037037037037,
+      "pair_scale": 1.2903058707356445,
+      "raw_l1_norm_total": 1.5123832369907886
+    },
+    {
+      "r": 31,
+      "expectation_bias": 0.017832103944794904,
+      "worst_index": 85,
+      "eta_pair_sum": 0.37810076868853004,
+      "pair_scale": 1.2537307386881082,
+      "raw_l1_norm_total": 1.4485099225579572
+    }
+  ],
+  "provenance": {
+    "filled_from": "scaling/data/NCC_channel_log_expected_r_min_N8_T2_eps0.02_q4_s4.json",
+    "reason": "same exact search points show r=31 has bias > 0.01 and r=32 has bias <= 0.01"
+  }
+}

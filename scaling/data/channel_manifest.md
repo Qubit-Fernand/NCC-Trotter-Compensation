@@ -1,24 +1,26 @@
 # Channel Data Manifest
 
-Generated: 2026-07-01
+Generated: 2026-07-09
 
-Scope: channel checkpoints used by `plot_four_series_scaling.ipynb`.
+Scope: channel checkpoints used by `scaling/plot_four_series_scaling.ipynb`.
 
 ## Current Summary
 
 After the latest local reconciliation:
 
-- Complete channel checkpoints in `scaling/data/`: 18 canonical stems.
-- Incomplete canonical checkpoints in `scaling/data/`: 3 stems.
-- Missing canonical checkpoint stems: 13 stems, of which 2 are the deferred `N=9` N-sweep endpoints.
-- Excluding the deferred `N=9` endpoints, every missing stem is part of the `N=8, T=2` epsilon sweep.
-- One non-`T=2` exception remains incomplete: log channel `N=8, T=1.0, eps=0.001` is still 1/10. The older 10/10 copy under `scaling/old_ver._rejective_samp./data_1_state/` uses `r_max=1024`, while the current canonical log run uses `r_max=4096`, so it has not been used as a replacement.
+- Complete channel checkpoints in `scaling/data/`: 25 canonical stems.
+- Incomplete canonical checkpoints in `scaling/data/`: 0 stems.
+- Missing canonical checkpoint stems: 9 stems, of which 2 are the retired `N=9` N-sweep endpoints.
+- Excluding the deferred `N=9` endpoints, every missing stem is now part of the `N=8, T=2` original-channel epsilon sweep.
+- The `N=8, T=2` log-channel epsilon sweep is complete for `eps in [0.1, 0.04, 0.02, 0.01, 0.005, 0.0025, 0.001]`, with expected `r_min` fields filled in the promoted canonical files.
 
 Recent local fixes:
 
 - `NCC_channel_log_sampling_r_N8_T0.8_eps0.001_trials1000_repeats10_q4_s4` was replaced from `~/Downloads/out/data/` after verifying the local 1/10 checkpoint was an exact prefix of the downloaded 10/10 Bohrium output.
+- `NCC_channel_log_sampling_r_N8_T1_eps0.001_trials1000_repeats10_q4_s4` was completed by combining the earlier prefix with an A100 sampled-only continuation.
 - `NCC_channel_original_sampling_r_N8_T1_eps0.001_trials1000_repeats10` was rebuilt from the matching 4-repeat prefix and 6-repeat tail; the canonical JSON/NPZ now hold all 10 repeats.
-- The duplicate non-canonical `...T0.8...c16_m64_benchmark` files were removed from formal `scaling/data/`. A raw extracted copy remains under `.bohrium/extracted/22657524/`.
+- `NCC_channel_log_sampling_r_N8_T2_eps0.04_trials1000_repeats10_q4_s4`, `eps0.02`, `eps0.01`, `eps0.005`, `eps0.0025`, and `eps0.001` were promoted from split sampled-only Bohrium/A100 outputs plus separate expected-search results.
+- The duplicate non-canonical `...T0.8...c16_m64_benchmark` files were removed from formal `scaling/data/`. A raw extracted copy remains under `.bohr/extracted/22657524/`.
 
 ## Expected Plot Grid
 
@@ -26,7 +28,7 @@ Recent local fixes:
 - T sweep: `N=8`, `T in [0.2, 0.4, 0.6, 0.8, 1.0, 2.0]`, `eps=0.001`
 - Epsilon sweep: `N=8`, `T=2`, `eps in [0.1, 0.04, 0.02, 0.01, 0.005, 0.0025, 0.001]`
 - Log channel uses `q4_s4`.
-- `N=9` is listed separately as deferred and is not counted in the active remaining-action summary.
+- `N=9` is listed separately as retired and is not counted in the active remaining-action summary. If the N sweep is extended later, the likely next target is `N=10`, not `N=9`.
 
 ## Complete Local Channel Files
 
@@ -51,17 +53,22 @@ Files below have both `.json` and `.npz` in `scaling/data/`, and `sampled_r_mins
 | `NCC_channel_log_sampling_r_N8_T0.4_eps0.001_trials1000_repeats10_q4_s4` | log | `N=8, T=0.4, eps=0.001` |
 | `NCC_channel_log_sampling_r_N8_T0.6_eps0.001_trials1000_repeats10_q4_s4` | log | `N=8, T=0.6, eps=0.001` |
 | `NCC_channel_log_sampling_r_N8_T0.8_eps0.001_trials1000_repeats10_q4_s4` | log | `N=8, T=0.8, eps=0.001` |
+| `NCC_channel_log_sampling_r_N8_T1_eps0.001_trials1000_repeats10_q4_s4` | log | `N=8, T=1.0, eps=0.001` |
+| `NCC_channel_log_sampling_r_N8_T2_eps0.001_trials1000_repeats10_q4_s4` | log | `N=8, T=2.0, eps=0.001` |
+| `NCC_channel_log_sampling_r_N8_T2_eps0.0025_trials1000_repeats10_q4_s4` | log | `N=8, T=2.0, eps=0.0025` |
+| `NCC_channel_log_sampling_r_N8_T2_eps0.005_trials1000_repeats10_q4_s4` | log | `N=8, T=2.0, eps=0.005` |
+| `NCC_channel_log_sampling_r_N8_T2_eps0.01_trials1000_repeats10_q4_s4` | log | `N=8, T=2.0, eps=0.01` |
+| `NCC_channel_log_sampling_r_N8_T2_eps0.02_trials1000_repeats10_q4_s4` | log | `N=8, T=2.0, eps=0.02` |
+| `NCC_channel_log_sampling_r_N8_T2_eps0.04_trials1000_repeats10_q4_s4` | log | `N=8, T=2.0, eps=0.04` |
 | `NCC_channel_log_sampling_r_N8_T2_eps0.1_trials1000_repeats10_q4_s4` | log | `N=8, T=2.0, eps=0.1` |
 
 ## Incomplete Local Checkpoints
 
-These files declare `repeats=10` in `params`, but fewer than 10 repeats are present in `sampled_r_mins`.
+No current canonical channel checkpoint in `scaling/data/` is incomplete.
 
 | File stem | Mode | Parameters | Completed repeats | `sampled_r_mins` |
 | --- | --- | --- | ---: | --- |
-| `NCC_channel_log_sampling_r_N8_T1_eps0.001_trials1000_repeats10_q4_s4` | log | `N=8, T=1.0, eps=0.001` | 1/10 | `[342]` |
-| `NCC_channel_original_sampling_r_N8_T2_eps0.001_trials1000_repeats10` | original | `N=8, T=2.0, eps=0.001` | 2/10 | `[792, 817]` |
-| `NCC_channel_original_sampling_r_N8_T2_eps0.1_trials1000_repeats10` | original | `N=8, T=2.0, eps=0.1` | 1/10 | `[104]` |
+| _None_ | | | | |
 
 ## Missing Canonical Files
 
@@ -69,21 +76,17 @@ Each entry means both `.json` and `.npz` are missing unless noted otherwise. Def
 
 | File stem | Roles |
 | --- | --- |
-| `NCC_channel_log_sampling_r_N8_T2_eps0.001_trials1000_repeats10_q4_s4` | N sweep log `N=8`; T sweep log `T=2`; epsilon sweep log `eps=0.001` |
+| `NCC_channel_original_sampling_r_N8_T2_eps0.001_trials1000_repeats10` | N sweep original `N=8`; T sweep original `T=2`; epsilon sweep original `eps=0.001` |
+| `NCC_channel_original_sampling_r_N8_T2_eps0.1_trials1000_repeats10` | epsilon sweep original `eps=0.1` |
 | `NCC_channel_original_sampling_r_N8_T2_eps0.04_trials1000_repeats10` | epsilon sweep original `eps=0.04` |
-| `NCC_channel_log_sampling_r_N8_T2_eps0.04_trials1000_repeats10_q4_s4` | epsilon sweep log `eps=0.04` |
 | `NCC_channel_original_sampling_r_N8_T2_eps0.02_trials1000_repeats10` | epsilon sweep original `eps=0.02` |
-| `NCC_channel_log_sampling_r_N8_T2_eps0.02_trials1000_repeats10_q4_s4` | epsilon sweep log `eps=0.02` |
 | `NCC_channel_original_sampling_r_N8_T2_eps0.01_trials1000_repeats10` | epsilon sweep original `eps=0.01` |
-| `NCC_channel_log_sampling_r_N8_T2_eps0.01_trials1000_repeats10_q4_s4` | epsilon sweep log `eps=0.01` |
 | `NCC_channel_original_sampling_r_N8_T2_eps0.005_trials1000_repeats10` | epsilon sweep original `eps=0.005` |
-| `NCC_channel_log_sampling_r_N8_T2_eps0.005_trials1000_repeats10_q4_s4` | epsilon sweep log `eps=0.005` |
 | `NCC_channel_original_sampling_r_N8_T2_eps0.0025_trials1000_repeats10` | epsilon sweep original `eps=0.0025` |
-| `NCC_channel_log_sampling_r_N8_T2_eps0.0025_trials1000_repeats10_q4_s4` | epsilon sweep log `eps=0.0025` |
 
-## Deferred N=9 Endpoints
+## Retired N=9 Endpoints
 
-These are still missing, but are excluded from the active remaining-action summary.
+These are still missing, but are excluded from the active remaining-action summary because they are not planned to be computed. If the N sweep is extended later, the likely next target is `N=10`.
 
 | File stem | Roles |
 | --- | --- |
@@ -92,6 +95,6 @@ These are still missing, but are excluded from the active remaining-action summa
 
 ## Notes
 
-- `plot_four_series_scaling.ipynb` discovers channel files with `NCC_channel_*_sampling_r_*.json` and reads `N/T/epsilon/repeats` from JSON `params`.
+- `scaling/plot_four_series_scaling.ipynb` discovers channel files with `NCC_channel_*_sampling_r_*.json` and reads `N/T/epsilon/repeats` from JSON `params`.
 - Prefer actual `len(sampled_r_mins)` over declared `params["repeats"]` when choosing between candidates.
-- The downloaded Bohrium output in `~/Downloads/out/data/` matched and replaced the previous 1/10 `N8, T=0.8, eps=0.001` log checkpoint.
+- Log-channel `N=8, T=2, eps=0.0025` repeat 6 was filled from the A100 local evaluation `repeat6_556_559_result.json`, giving `sampled_r_min=559`.
