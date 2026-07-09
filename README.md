@@ -1,50 +1,77 @@
 # NCC-Trotter-Compensation
 
-这个仓库主要放 NCC/Trotter compensation 的数值实验、数据 checkpoint 和画图脚本。当前主线的 scaling 代码已经集中到 `scaling/` 下面。
+This repository contains numerical experiments, data checkpoints, and plotting
+scripts for NCC/Trotter compensation. The active scaling code is organized under
+`scaling/`.
 
-本 README 只介绍当前目录中没有被 `.gitignore` 排除的主要文件/文件夹；本地运行缓存、Bohrium 工作目录、Overleaf 文章目录、日志和个人 memory 不在这里展开。
+This README describes the main files and directories that are intended to be
+part of the repository. Local run caches, Bohrium staging directories, Overleaf
+manuscript folders, logs, and personal memory files are not documented here.
 
-## 当前结构
+## Repository Layout
 
 - `scaling/`
-  当前 NCC scaling 主目录，包含 active implementation、batch JSON、画图 notebook、主数据目录和少量 legacy 代码。
+  Main NCC scaling directory, including active implementations, batch JSON
+  files, plotting notebooks, the primary data directory, and some legacy code.
 - `scaling/data/`
-  当前 scaling 实验的主数据目录。`scaling/plot_*_scaling.ipynb` 默认从这里读取 JSON/NPZ checkpoint。
+  Primary data directory for scaling experiments. The `scaling/plot_*_scaling.ipynb`
+  notebooks read JSON/NPZ checkpoints from this directory by default.
 - `scaling/additonal_optimized_run/`
-  NCC channel log 的 cache 优化运行脚本。目前用于把本地 `expected_r_min` 搜索和 Bohrium 上的 sampled-only 搜索拆开。
+  Cache-optimized scripts for NCC channel log runs. These are currently used to
+  split local `expected_r_min` searches from Bohrium sampled-only searches.
 - `scaling/old_ver._rejective_samp./`
-  历史 rejection-sampling 版本。这里仍有少量历史数据子目录，例如 `data_1_state/`、`data_3_17/`，但它们不是当前主数据入口。
+  Historical rejection-sampling implementation. It still contains a few old
+  data subdirectories, such as `data_1_state/` and `data_3_17/`, but it is not
+  the current primary data entry point.
 - `figures/`
-  图像输出目录。
+  Figure output directory.
 - `scaling/plot_original_scaling.ipynb`
-  从 `scaling/data/` 读取 original compensation 数据并画 scaling 图，输出到 `figures/`。
+  Reads original-compensation data from `scaling/data/` and writes figures to
+  `figures/`.
 - `scaling/plot_log_scaling.ipynb`
-  从 `scaling/data/` 读取 log compensation 数据并画 scaling 图，输出到 `figures/`。
+  Reads log-compensation data from `scaling/data/` and writes figures to
+  `figures/`.
 - `scaling/plot_combined_scaling.ipynb`
-  对比 original/log scaling，输出到 `figures/`。
+  Compares original and log scaling results, writing figures to `figures/`.
 - `scaling/plot_four_series_scaling.ipynb`
-  汇总 operator/channel 与 original/log 四组曲线，输出到 `figures/`。
+  Combines the four operator/channel and original/log series, writing figures to
+  `figures/`.
 - `tests/`
-  当前 scaling 代码的 smoke/unit tests。
+  Smoke and unit tests for the current scaling code.
 - `1-norm/`
-  Pauli sampling overhead 相关说明和 CSV 数据。
-- `resource/` 与 `hncc_resource_plot.ipynb`
-  HNCC resource estimate/collect 脚本、预计算数据和对应画图 notebook。其中
-  `resource/hncc_resource_estimate.py` 是核心算法实现和可直接画图的 CLI；
-  `resource/hncc_resource_collect.py` import 前者，只负责扫参数并把表格数据落到
-  `resource/data/*.json`；`hncc_resource_plot.ipynb` 再读取这些 JSON 画图。
-  注意 resource estimate 中的 expected-precision 约束不是对每个整数
-  Trotter step `r` 都重新精确计算一次。它先在一组 `x_grid` 步长上精确
-  计算 per-step error curve，然后用 `log_interpolate_error` 对
-  `step_error(T/r)` 做 log-log 插值；若 `T/r` 落在网格外，则用边缘点做
-  log-log 外推。该方法适合 resource trend 和初始 bracket 预测，但文章中
-  需要精确 finite-size `expected_r_min` 时，应以
-  `scaling/additonal_optimized_run/NCC_channel_expected_r_min_cached.py` 或
-  `scaling/NCC_channel_find_r_min.py` 的 exact integer-r evaluation 为准。
+  Notes and CSV data for Pauli sampling overhead.
+- `resource/` and `hncc_resource_plot.ipynb`
+  HNCC resource-estimation scripts, precomputed data, and plotting notebooks.
+  `resource/hncc_resource_estimate.py` is the main algorithmic implementation
+  and CLI. `resource/hncc_resource_collect.py` imports it and only handles
+  parameter sweeps and JSON table output under `resource/data/*.json`.
+  `hncc_resource_plot.ipynb` reads those JSON files for plotting.
 - `requirements.txt`
-  Python 依赖列表。
+  Python dependency list.
 
-## 主线代码
+## Important Data Caveat
+
+The channel-pairing angle bug in the active channel samplers was fixed on
+2026-07-09. The Pauli decompositions and `eta_pair_sum` values were correct,
+but the old code converted `eta_pair_sum` to the Pauli-pairing angle by solving
+`sin(theta) / cos(theta)^2 = eta`. For the signed channel sampler with branches
+`U_theta = cos(theta) I + i sin(theta) P` and `-P(.)P`, the branch expectation
+is proportional to `I + i tan(theta) ad_P`, so unbiased sampling requires
+`theta = arctan(eta_pair_sum)`.
+
+The active files `scaling/NCC_channel_original.py` and
+`scaling/NCC_channel_log.py` now use this `arctan` parameterization and validate
+against the actual paired sampled-branch expectation.
+
+Existing sampled LCQC data under `scaling/data/` that was generated before this
+fix still contains the paired-branch bias. Deterministic expected-map curves
+from those runs remain valid for the intended truncated map, because the old
+expected path used the hand-written target expectation rather than the biased
+finite-sample branch expectation. When using `scaling/data/` for paper figures
+or tables, distinguish sampled data generated before this fix from expected or
+deterministic data.
+
+## Active Code
 
 Active scaling scripts:
 
@@ -56,69 +83,86 @@ Active scaling scripts:
 - `scaling/NCC_channel_find_r_min.py`
 - `scaling/Pauli_Hamiltonian_BCH.py`
 
-其中：
+Naming conventions:
 
-- `operator` 版本对应算符层面的补偿与采样实现。
-- `channel` 版本对应量子信道层面的补偿与采样实现。
-- `original` 是固定低阶补偿方案。
-- `log` 是精度相关的高阶补偿方案。
+- `operator` refers to operator-level compensation and sampling.
+- `channel` refers to quantum-channel-level compensation and sampling.
+- `original` is the fixed low-order compensation scheme.
+- `log` is the precision-dependent higher-order compensation scheme.
 
 ## Batch Configs
 
-常用 batch 配置也放在 `scaling/` 下：
+Common batch configurations are stored under `scaling/`:
 
 - `scaling/run_original.json`
 - `scaling/run_log.json`
 - `scaling/run_channel_original_N8_eps_sweep.json`
 - `scaling/run_channel_log_N8_eps_sweep.json`
 
-这些 JSON 文件通常设置 `out_dir` 为 `scaling/data`。
+These JSON files usually set `out_dir` to `scaling/data`.
 
-## 运行方式
+## Running
 
-安装依赖：
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-运行 operator batch：
+Run operator batches:
 
 ```bash
 python scaling/NCC_operator_find_r_min.py --batch-file scaling/run_original.json
 python scaling/NCC_operator_find_r_min.py --batch-file scaling/run_log.json
 ```
 
-运行 channel batch：
+Run channel batches:
 
 ```bash
 python scaling/NCC_channel_find_r_min.py --batch-file scaling/run_channel_original_N8_eps_sweep.json
 python scaling/NCC_channel_find_r_min.py --batch-file scaling/run_channel_log_N8_eps_sweep.json
 ```
 
-长任务建议使用 unbuffered output：
+For long jobs, unbuffered output is recommended:
 
 ```bash
 PYTHONUNBUFFERED=1 python scaling/NCC_channel_find_r_min.py --batch-file scaling/run_channel_log_N8_eps_sweep.json 2>&1 | tee logs/run_channel_log.tmux.log
 ```
 
-画图 notebook 位于 `scaling/plot_*_scaling.ipynb`。这些 notebook 会自动定位
-`scaling/data/`，因此从仓库根目录或从 `scaling/` 目录启动 kernel 都可以；
-PDF 输出仍写入仓库根目录下的 `figures/`。
+The plotting notebooks are located at `scaling/plot_*_scaling.ipynb`. They
+automatically locate `scaling/data/`, so the kernel can be started either from
+the repository root or from `scaling/`. PDF outputs are still written under the
+repository-level `figures/` directory.
 
-## Cache 优化拆分
+## Cache-Optimized Split Runs
 
-`scaling/additonal_optimized_run/` 中的脚本用于当前 NCC channel log 的 cache workflow：
+Scripts under `scaling/additonal_optimized_run/` support the current NCC
+channel log cache workflow:
 
-- 本地跑 `expected_r_min` 搜索。
-- Bohrium 远端跳过 expected search，只跑 sampled search。
-- 两边都应先加载同一组 cache：`static_cache`、`slim_evolution_cache`、`full_evolution_cache`。
+- Run the `expected_r_min` search locally.
+- Run sampled-only searches on Bohrium.
+- Load the same cache set on both sides: `static_cache`,
+  `slim_evolution_cache`, and `full_evolution_cache`.
 
-## 输出
+## Resource Estimate Note
 
-默认输出在 `scaling/data/`：
+The expected-precision constraint in the resource-estimation code is not an
+exact re-evaluation for every integer Trotter step `r`. It first computes
+per-step error values on an `x_grid`, then uses `log_interpolate_error` to
+evaluate `step_error(T/r)` by log-log interpolation. If `T/r` lies outside the
+grid, it uses log-log extrapolation from the boundary points.
 
-- `.json` 保存参数、repeat 结果和搜索历史。
-- `.npz` 保存数值数组，供 notebook 后处理和画图。
+This is appropriate for resource trends and initial bracket prediction. For
+paper claims about exact finite-size `expected_r_min`, use exact integer-`r`
+evaluation from `scaling/additonal_optimized_run/NCC_channel_expected_r_min_cached.py`
+or `scaling/NCC_channel_find_r_min.py`.
 
-`find_r_min` 脚本的目标是搜索满足目标精度 `epsilon` 的最小 Trotter 步数 `r`。
+## Outputs
+
+Default outputs are written to `scaling/data/`:
+
+- `.json` files store parameters, repeat results, and search histories.
+- `.npz` files store numerical arrays for notebook post-processing and plotting.
+
+The `find_r_min` scripts search for the minimum Trotter step count `r` that
+meets the target precision `epsilon`.

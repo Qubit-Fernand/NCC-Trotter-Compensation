@@ -242,7 +242,7 @@ def tail_sampling_ad_phi_tuples(phi_layer_in_tail_F: dict[int, dict], k_order: i
 
 
 def paired_channel_parameters(eta_pair_sum: float) -> dict:
-    """Solve sin(theta) / cos(theta)^2 = eta_pair_sum and return pairing data."""
+    """Set tan(theta) = eta_pair_sum and return pairing data."""
     if eta_pair_sum <= 0:
         return {
             "theta": 0.0,
@@ -253,13 +253,13 @@ def paired_channel_parameters(eta_pair_sum: float) -> dict:
             "unitary_branch_prob": 1.0,
         }
 
-    sin_theta = (2.0 * eta_pair_sum) / (math.sqrt(1.0 + 4.0 * eta_pair_sum**2) + 1.0)
-    theta = math.asin(min(1.0, max(-1.0, sin_theta)))
+    theta = math.atan(eta_pair_sum)
+    sin_theta = math.sin(theta)
     cos_theta = math.cos(theta)
     cos_sq = cos_theta**2
-    # Section 5.2 normalization:
-    # I +/- i eta ad_P = pair_scale * ((1-p) U_theta(.)U_theta^\dagger + p(-P.P))
-    # with pair_scale = (1 + sin^2 theta) / cos^2 theta and p = sin^2 theta / (1 + sin^2 theta).
+    # The signed branch expectation is
+    # p U_theta(.)U_theta^\dagger + (1-p)(-P.P) = (I + i tan(theta) ad_P) / pair_scale.
+    # Here p = 1 / (1 + sin^2 theta).
     pair_scale = (1.0 + sin_theta**2) / cos_sq
     unitary_branch_prob = 1.0 / (1.0 + sin_theta**2)
     return {
@@ -270,6 +270,14 @@ def paired_channel_parameters(eta_pair_sum: float) -> dict:
         "pair_scale": pair_scale,
         "unitary_branch_prob": unitary_branch_prob,
     }
+
+
+def apply_paired_branch_expectation(unitary: np.ndarray, pauli: np.ndarray, unitary_branch_prob: float, rho: np.ndarray) -> np.ndarray:
+    """Enumerate the actual signed pair sampler branches."""
+    return (
+        unitary_branch_prob * apply_unitary_channel(unitary, rho)
+        - (1.0 - unitary_branch_prob) * apply_unitary_channel(pauli, rho)
+    )
 
 
 @lru_cache(maxsize=None)
@@ -437,13 +445,17 @@ def build_tilde_V(static, t_total, r, validation_tol=1e-10):
             data = F_terms[order]
             if data["kind"] == "pair":
                 for Pauli in pair_components[order]:
-                    # for this part, weight contains eta_2/eta * pair_scale
-                    # eta_2/eta * pair_scale (I + i eta ad_W)/pair_sacle
+                    # For paired terms, weight contains eta_s/eta_pair_sum * pair_scale.
+                    # The branch expectation below is computed from the actual sampler.
                     out += (
                         weight
                         * Pauli["prob"]
-                        * (rho_batch + eta_pair_sum * apply_ad_commutator(1j * Pauli["W_mat"], rho_batch))
-                        / pair_scale
+                        * apply_paired_branch_expectation(
+                            Pauli["rotation_branch_in_pair"],
+                            Pauli["W_mat"],
+                            pair_params["unitary_branch_prob"],
+                            rho_batch,
+                        )
                     )
             else:
                 # for this part, weight contains sum 2^j eta_s = data["sampling_l1_norm"]
