@@ -1,0 +1,45 @@
+{
+  "mode": "original",
+  "N": 8,
+  "T": 2.0,
+  "epsilon": 0.02,
+  "bracket": {
+    "low": 56,
+    "high": 64,
+    "known_fail": {
+      "56": 0.02823981
+    },
+    "known_pass": {
+      "64": 0.01873553
+    }
+  },
+  "searches": [
+    {
+      "r": 64,
+      "expectation_bias": 0.01873553,
+      "argmax": -1,
+      "pass": true,
+      "source": "eps0.04_log_reused"
+    },
+    {
+      "r": 60,
+      "expectation_bias": 0.022836264473836746,
+      "argmax": 85,
+      "pass": false
+    },
+    {
+      "r": 62,
+      "expectation_bias": 0.020649829397900315,
+      "argmax": 85,
+      "pass": false
+    },
+    {
+      "r": 63,
+      "expectation_bias": 0.019661437693791934,
+      "argmax": 85,
+      "pass": true
+    }
+  ],
+  "expected_r_min": 63,
+  "expectation_bias_at_min": 0.019661437693791934
+}

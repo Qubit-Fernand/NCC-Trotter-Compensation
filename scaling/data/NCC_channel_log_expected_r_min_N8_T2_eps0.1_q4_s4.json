@@ -1,0 +1,64 @@
+{
+  "script": "NCC_channel_expected_r_min_A100_manual",
+  "mode": "log",
+  "params": {
+    "N": 8,
+    "J": 1.0,
+    "h": 1.0,
+    "T": 2.0,
+    "requested_repeats": 10,
+    "base_seed": 7,
+    "r_max": 4096,
+    "s0": 4,
+    "q0": 4,
+    "epsilon": 0.1
+  },
+  "expected_r_min": 21,
+  "expectation_bias_at_min": 0.08789607772273944,
+  "searches": [
+    {
+      "r": 16,
+      "expectation_bias": 0.12785803375514548,
+      "pass": false,
+      "error_is_true_max": false,
+      "worst_index": 3,
+      "worst_label": "00000011",
+      "eta_pair_sum": 1.8124999999999998,
+      "pair_scale": 3.7604022391228296,
+      "raw_l1_norm_total": 6.505193905789497,
+      "note": "First threshold violation above epsilon; not a true max."
+    },
+    {
+      "r": 20,
+      "expectation_bias": 0.10736764222898834,
+      "pass": false,
+      "error_is_true_max": false,
+      "worst_index": 85,
+      "worst_label": "01010101",
+      "eta_pair_sum": 1.056,
+      "pair_scale": 2.33678069146422,
+      "raw_l1_norm_total": 3.4610473581308874,
+      "note": "First threshold violation above epsilon; not a true max."
+    },
+    {
+      "r": 21,
+      "expectation_bias": 0.08789607772273944,
+      "pass": true,
+      "error_is_true_max": true,
+      "worst_index": 85,
+      "worst_label": "01010101",
+      "eta_pair_sum": 0.9398553072022457,
+      "pair_scale": 2.129157578457947,
+      "raw_l1_norm_total": 3.0540945474506334,
+      "note": "A100 expected-only result; true max at eps=0.1."
+    }
+  ],
+  "provenance": {
+    "source": "A100 expected-only bisection/checks on 2026-07-09",
+    "remote_result_file": "/data/users/zhoushuo/NCC-Trotter-Compensation/tmp_expected_threshold_chunk_0709_results.json",
+    "notes": [
+      "r=16 and r=20 are first threshold violations, not true maxima.",
+      "r=21 is the confirmed minimum step count with true max below eps=0.1."
+    ]
+  }
+}

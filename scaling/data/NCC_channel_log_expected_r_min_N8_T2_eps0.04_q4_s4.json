@@ -1,128 +1,124 @@
 {
-  "script": "NCC_channel_expected_r_min_warm_start.py",
+  "script": "NCC_channel_expected_r_min_A100_manual",
   "mode": "log",
   "params": {
     "N": 8,
     "J": 1.0,
     "h": 1.0,
     "T": 2.0,
-    "epsilon": 0.04,
     "requested_repeats": 10,
     "base_seed": 7,
     "r_max": 4096,
     "s0": 4,
-    "q0": 4
+    "q0": 4,
+    "epsilon": 0.04
   },
-  "expected_r_min": 16,
-  "expectation_bias_at_min": 0.02193289565038262,
+  "expected_r_min": 26,
+  "expectation_bias_at_min": 0.03662976572834528,
   "searches": [
     {
-      "r": 1,
-      "expectation_bias": 1035.90453120407,
-      "worst_index": 1,
-      "eta_pair_sum": 3583.999999999999,
-      "pair_scale": 7168.000069754063,
-      "raw_l1_norm_total": 187050.66673642074
-    },
-    {
-      "r": 2,
-      "expectation_bias": 3972.957000636563,
-      "worst_index": 1,
-      "eta_pair_sum": 479.9999999999999,
-      "pair_scale": 960.0005208332376,
-      "raw_l1_norm_total": 12202.667187499905
-    },
-    {
-      "r": 4,
-      "expectation_bias": 148.49262501379926,
-      "worst_index": 1,
-      "eta_pair_sum": 67.99999999999999,
-      "pair_scale": 136.0036764208966,
-      "raw_l1_norm_total": 838.6703430875633
-    },
-    {
-      "r": 8,
-      "expectation_bias": 0.3924326287955427,
-      "worst_index": 1,
-      "eta_pair_sum": 10.499999999999998,
-      "pair_scale": 21.02379604162858,
-      "raw_l1_norm_total": 64.94046270829526
-    },
-    {
-      "r": 12,
-      "expectation_bias": 0.07176343479347615,
-      "worst_index": 1,
-      "eta_pair_sum": 3.7037037037037024,
-      "pair_scale": 7.474602631532602,
-      "raw_l1_norm_total": 16.149499750874167
-    },
-    {
-      "r": 14,
-      "expectation_bias": 0.225884333020417,
-      "worst_index": 3,
-      "eta_pair_sum": 2.5189504373177836,
-      "pair_scale": 5.136189757266936,
-      "raw_l1_norm_total": 9.81868316279241
-    },
-    {
-      "r": 15,
-      "expectation_bias": 0.16817658094357488,
-      "worst_index": 3,
-      "eta_pair_sum": 2.1238518518518514,
-      "pair_scale": 4.3638270765989535,
-      "raw_l1_norm_total": 7.917064936681259
-    },
-    {
       "r": 16,
-      "expectation_bias": 0.02193289565038262,
-      "worst_index": 1,
+      "expectation_bias": 0.12785803375514548,
+      "pass": false,
+      "error_is_true_max": false,
+      "worst_index": 3,
+      "worst_label": "00000011",
       "eta_pair_sum": 1.8124999999999998,
       "pair_scale": 3.7604022391228296,
-      "raw_l1_norm_total": 6.505193905789497
+      "raw_l1_norm_total": 6.505193905789497,
+      "note": "First threshold violation above epsilon; not a true max. Corrects stale warm-start value 0.02193289565038262 from the old early-exit path."
+    },
+    {
+      "r": 20,
+      "expectation_bias": 0.10736764222898834,
+      "pass": false,
+      "error_is_true_max": false,
+      "worst_index": 85,
+      "worst_label": "01010101",
+      "eta_pair_sum": 1.056,
+      "pair_scale": 2.33678069146422,
+      "raw_l1_norm_total": 3.4610473581308874,
+      "note": "Excluded by the stricter eps=0.1 search; first violation above 0.1, hence also above 0.04."
+    },
+    {
+      "r": 21,
+      "expectation_bias": 0.08789607772273944,
+      "pass": false,
+      "error_is_true_max": true,
+      "worst_index": 85,
+      "worst_label": "01010101",
+      "eta_pair_sum": 0.9398553072022457,
+      "pair_scale": 2.129157578457947,
+      "raw_l1_norm_total": 3.0540945474506334,
+      "note": "True max from the eps=0.1 expected search; exceeds eps=0.04."
     },
     {
       "r": 24,
-      "expectation_bias": 0.023276865109875092,
-      "worst_index": 3,
+      "expectation_bias": 0.05084594147834909,
+      "pass": false,
+      "error_is_true_max": false,
+      "worst_index": 85,
+      "worst_label": "01010101",
       "eta_pair_sum": 0.685185185185185,
       "pair_scale": 1.6964418504590795,
-      "raw_l1_norm_total": 2.2386229204179275
+      "raw_l1_norm_total": 2.2386229204179275,
+      "note": "Single-state lower bound at basis 01010101; enough to exclude r=24, not claimed as true max."
+    },
+    {
+      "r": 25,
+      "expectation_bias": 0.04301428228293719,
+      "pass": false,
+      "error_is_true_max": false,
+      "worst_index": 85,
+      "worst_label": "01010101",
+      "eta_pair_sum": 0.622592,
+      "pair_scale": 1.5970232289656903,
+      "raw_l1_norm_total": 2.057522855632357,
+      "note": "First threshold violation above epsilon; not a true max."
+    },
+    {
+      "r": 26,
+      "expectation_bias": 0.03662976572834528,
+      "pass": true,
+      "error_is_true_max": true,
+      "worst_index": 85,
+      "worst_label": "01010101",
+      "eta_pair_sum": 0.5680473372781065,
+      "pair_scale": 1.513509534015226,
+      "raw_l1_norm_total": 1.907146544857517
     },
     {
       "r": 28,
-      "expectation_bias": 0.02387791830544011,
-      "worst_index": 43,
+      "expectation_bias": 0.027042246842356756,
+      "pass": true,
+      "error_is_true_max": true,
+      "worst_index": 85,
+      "worst_label": "01010101",
       "eta_pair_sum": 0.47813411078717194,
       "pair_scale": 1.3836361196474158,
       "raw_l1_norm_total": 1.676291957492758
     },
     {
-      "r": 30,
-      "expectation_bias": 0.02039088763299334,
-      "worst_index": 85,
-      "eta_pair_sum": 0.4077037037037037,
-      "pair_scale": 1.2903058707356445,
-      "raw_l1_norm_total": 1.5123832369907886
-    },
-    {
-      "r": 31,
-      "expectation_bias": 0.017832103944794904,
-      "worst_index": 85,
-      "eta_pair_sum": 0.37810076868853004,
-      "pair_scale": 1.2537307386881082,
-      "raw_l1_norm_total": 1.4485099225579572
-    },
-    {
       "r": 32,
-      "expectation_bias": 0.015661874100732012,
+      "expectation_bias": 0.015661874100730173,
+      "pass": true,
+      "error_is_true_max": true,
       "worst_index": 85,
+      "worst_label": "01010101",
       "eta_pair_sum": 0.3515625,
       "pair_scale": 1.2224503121292905,
-      "raw_l1_norm_total": 1.393999791295957
+      "raw_l1_norm_total": 1.393999791295957,
+      "source": "eps=0.1 sampled JSON sample-error branch full max"
     }
   ],
   "provenance": {
-    "seed_json": "scaling/data/NCC_channel_log_expected_r_min_N8_T2_eps0.02_q4_s4.json",
-    "search": "warm-start exact integer-r evaluation"
+    "source": "A100 expected-only bisection/checks on 2026-07-09",
+    "remote_result_file": "/data/users/zhoushuo/NCC-Trotter-Compensation/tmp_expected_threshold_chunk_0709_results.json",
+    "supersedes": "Old local warm-start file produced expected_r_min=16 using threshold early-exit values as if they were true maxima.",
+    "notes": [
+      "r=16 and r=25 are first threshold violations, not true maxima.",
+      "r=24 is a single-state lower bound at basis 01010101, sufficient to exclude r=24 for eps=0.04.",
+      "r=26 is the confirmed minimum step count with true max below eps=0.04."
+    ]
   }
 }

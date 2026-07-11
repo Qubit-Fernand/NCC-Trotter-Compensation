@@ -1,8 +1,36 @@
-# Pauli Sampling Overhead Bound
+# Strict-Paired Channel Pauli Sampling Overhead Bound
 
-This note records the sampling-overhead bound used for the numerical
-Pauli-distribution sampler, as opposed to the light-cone rejection-sampling
-bound in the main theorem.
+This note records the strict-paired channel-level Pauli-sampling 1-norm floor
+used by the scaling notebooks.  Every retained single \(\Phi_q\) is identity
+paired; only multi-commutator Taylor terms remain as direct sampling tails.
+
+## Archived Historical Tables
+
+The files under `archive/` are historical references only.  Some used the
+wrong pairing-angle conversion, namely a one-step channel pair scale
+
+```tex
+\sqrt{1+4\eta(x)^2},
+```
+
+which corresponds to the previous incorrect equation
+`sin(theta)/cos(theta)^2 = eta`.  The active channel sampler now uses the
+unbiased condition
+
+```tex
+\tan(\theta)=\eta.
+```
+
+Under this corrected condition, the signed channel-pair normalization is
+
+```tex
+1+2\eta(x)^2.
+```
+
+The `correct_pair_theta_reference` files in the archive fix this angle but
+still use the old \(K=1,s_0=4\) convention in which \(\Phi_4\) is a direct
+tail rather than a paired single term.  Do not use any archived CSV for new
+strict-paired plots or bounds.
 
 ## Basic Principle
 
@@ -12,28 +40,43 @@ For one compensated Trotter step with step size
 x = T / r,
 ```
 
-let `W(x)` be the actual one-step sampling 1-norm of the implemented Pauli
-sampler. After `r` steps, the total sampling overhead is
+let `W(x)` be the one-step sampling 1-norm of the strict-paired channel
+sampler.
+After `r` steps, the total sampling overhead is
 
 ```tex
 \ell = W(T/r)^r.
 ```
 
-To keep the Monte Carlo repetition count at the standard scale, we impose the
-constant-overhead condition
+The current floor tables impose the stricter cap
 
 ```tex
-W(T/r)^r \le e.
+W(T/r)^r \le 1.75.
 ```
 
-Equivalently, for numerical evaluation,
+Equivalently,
 
 ```tex
-r \log W(T/r) \le 1.
+r \log W(T/r) \le \log(1.75).
 ```
 
-This avoids replacing `1+x` by `exp(x)` and gives a slightly tighter minimum
-step count.
+The active `cap=1.75` channel-floor CSVs are:
+
+```text
+pauli_sampling_overhead_rmin_N8_cap_1p75.csv
+pauli_sampling_overhead_rmin_N_sweep_T2_cap_1p75.csv
+```
+
+To reproduce the active tables (and to generate another cap), run
+
+```bash
+python 1-norm/recompute_strict_paired_channel_floors.py --cap 1.75
+```
+
+The generator obtains the exact sparse-Pauli decompositions of
+\(\Phi_2,\Phi_3,\Phi_4\), then scans integer \(r\) directly for the first
+value satisfying the bound.  It does not rely on a binary-search monotonicity
+assumption.
 
 ## N = 8 Heisenberg Parameters
 
@@ -44,134 +87,73 @@ experiments,
 N=8,\quad J=h=1,\quad K=1.
 ```
 
-Direct Pauli-string calculation gives
-
-```tex
-\|\Phi_2\|_{P,1}=64,\qquad
-\|\Phi_3\|_{P,1}=416,\qquad
-\|\Phi_4\|_{P,1}=\frac{4576}{3}.
-```
-
-Define
+The paired low-order channel weight is
 
 ```tex
 \eta(x)=64x^2+416x^3.
 ```
 
-## Original NCC, s0 = 3
+## Original NCC, \(K=1,s_0=3\)
 
-The original NCC sampler keeps the paired orders `s=2,3`. The operator-level
-one-step norm is
-
-```tex
-W_{\rm op}^{\rm orig}(x)
-=
-\sqrt{1+\eta(x)^2}.
-```
-
-The channel-level one-step norm is
+Original NCC pairs the only retained single terms, \(\Phi_2,\Phi_3\).  With
+`tan(theta)=eta`, its one-step sampling norm is
 
 ```tex
 W_{\rm ch}^{\rm orig}(x)
 =
-\sqrt{1+4\eta(x)^2}.
+1+2\eta(x)^2.
 ```
 
-The corresponding minimum `r` from `W(T/r)^r <= e` is:
+## HNCC, Strict Pairing, \(K=1,q_0=s_0=4\)
 
-| T | original operator r_min | original channel r_min |
+Strict HNCC pairs \(\Phi_2,\Phi_3,\Phi_4\) together.  The only direct tail
+through total order four is
+
+```tex
+\frac{1}{2!}\operatorname{ad}_{\Phi_2}^2,
+```
+
+whose executable channel-sampling 1-norm is \(2a_2^2x^4\).  Hence, with
+\(a_q=\|\Phi_q\|_{\mathrm{Pauli},1}\),
+
+```tex
+W_{\rm ch}^{\rm HNCC,strict}(x)
+=
+1+2\bigl(a_2x^2+a_3x^3+a_4x^4\bigr)^2+2a_2^2x^4.
+```
+
+For \(N=8\), the exact coefficients are
+
+```tex
+a_2=64,\qquad a_3=416,\qquad a_4=\frac{4576}{3},
+```
+
+so the direct tail is \(8192x^4\).  This replaces the old non-strict formula
+\(1+2(a_2x^2+a_3x^3)^2+(2a_4+2a_2^2)x^4\), which treated \(\Phi_4\) as a
+tail.
+
+The corrected `N=8` channel floors under `W(T/r)^r <= 1.75` are:
+
+| T | original channel r_min | strict HNCC channel r_min |
 |---:|---:|---:|
-| 0.2 | 2 | 3 |
-| 0.4 | 5 | 7 |
-| 0.6 | 9 | 12 |
-| 0.8 | 12 | 18 |
-| 1.0 | 16 | 24 |
-| 1.2 | 20 | 30 |
-| 1.4 | 25 | 37 |
-| 1.6 | 29 | 44 |
-| 1.8 | 34 | 51 |
-| 2.0 | 39 | 58 |
+| 0.2 | 4 | 4 |
+| 0.4 | 9 | 10 |
+| 0.6 | 15 | 17 |
+| 0.8 | 21 | 25 |
+| 1.0 | 29 | 34 |
+| 1.2 | 36 | 42 |
+| 1.4 | 44 | 52 |
+| 1.6 | 52 | 62 |
+| 1.8 | 61 | 72 |
+| 2.0 | 70 | 83 |
 
-## Log-Precision NCC, Channel s0 = 4
+For the N-sweep at fixed `T=2.0`, using the N-dependent Pauli 1-norm
+coefficients gives:
 
-For the channel-level log-precision experiments with `q0=s0=4`, the channel
-sampler has
-
-```tex
-W_{\rm ch}^{(s_0=4)}(x)
-=
-\sqrt{1+4\eta(x)^2}
-+
-\frac{33728}{3}x^4.
-```
-
-The minimum `r` from `W(T/r)^r <= e` is:
-
-| T | channel log r_min |
-|---:|---:|
-| 0.2 | 4 |
-| 0.4 | 9 |
-| 0.6 | 15 |
-| 0.8 | 22 |
-| 1.0 | 29 |
-| 1.2 | 37 |
-| 1.4 | 45 |
-| 1.6 | 53 |
-| 1.8 | 62 |
-| 2.0 | 72 |
-
-For the left N-sweep plot at fixed `T=2.0`, the same calculation with the
-N-dependent Pauli 1-norm coefficients gives the following floors:
-
-| N | original operator r_min | operator log r_min | original channel r_min | channel log r_min |
-|---:|---:|---:|---:|---:|
-| 4 | 26 | 30 | 38 | 46 |
-| 5 | 26 | 31 | 38 | 47 |
-| 6 | 33 | 41 | 49 | 61 |
-| 7 | 33 | 40 | 49 | 60 |
-| 8 | 39 | 48 | 58 | 72 |
-
-## Log-Precision NCC, Operator s0 = 6
-
-For the operator-level log-precision experiments with `q0=s0=6`, the exact
-operator-level Pauli 1-norm coefficients are
-
-```tex
-\|\tilde F_2\|_{P,1}=64,\qquad
-\|\tilde F_3\|_{P,1}=416,\qquad
-\|\tilde F_4\|_{P,1}=\frac{8320}{3},
-```
-
-```tex
-\|\tilde F_5\|_{P,1}=15123.2,\qquad
-\|\tilde F_6\|_{P,1}\approx 76110.9333333291.
-```
-
-Thus
-
-```tex
-W_{\rm op}^{(s_0=6)}(x)
-=
-\sqrt{1+\eta(x)^2}
-+
-\frac{8320}{3}x^4
-+
-15123.2x^5
-+
-76110.9333333291x^6.
-```
-
-The minimum `r` from `W(T/r)^r <= e` is:
-
-| T | operator log s0=6 r_min |
-|---:|---:|
-| 0.2 | 3 |
-| 0.4 | 6 |
-| 0.6 | 10 |
-| 0.8 | 15 |
-| 1.0 | 20 |
-| 1.2 | 25 |
-| 1.4 | 30 |
-| 1.6 | 36 |
-| 1.8 | 42 |
-| 2.0 | 48 |
+| N | original channel r_min | strict HNCC channel r_min |
+|---:|---:|---:|
+| 4 | 45 | 53 |
+| 5 | 46 | 53 |
+| 6 | 59 | 69 |
+| 7 | 58 | 69 |
+| 8 | 70 | 83 |

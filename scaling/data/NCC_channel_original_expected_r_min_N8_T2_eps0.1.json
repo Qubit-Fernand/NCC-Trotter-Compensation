@@ -1,0 +1,28 @@
+{
+  "script": "extracted_expected_r_min_from_sampled_checkpoint",
+  "mode": "original",
+  "params": {
+    "N": 8,
+    "J": 1.0,
+    "h": 1.0,
+    "T": 2.0,
+    "epsilon": 0.1,
+    "trials": 1000,
+    "repeats": 10,
+    "base_seed": 7,
+    "r_max": 4096,
+    "s0": null,
+    "q0": null
+  },
+  "expected_r_min": 38,
+  "expectation_bias_at_min": 0.004288375077216784,
+  "searches": [],
+  "provenance": {
+    "source_type": "extracted from canonical sampled checkpoint; not a standalone expected-only execution",
+    "source_json": "NCC_channel_original_sampling_r_N8_T2_eps0.1_trials1000_repeats10_standard_sampled.json",
+    "selected_source_index": 0,
+    "source_expected_r_mins": [38],
+    "source_expectation_biases": [0.004288375077216784],
+    "selection": "the sole recorded expected-r pair; no independent expected-only search trace is claimed"
+  }
+}

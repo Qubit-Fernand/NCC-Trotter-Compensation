@@ -17,6 +17,8 @@ __pycache__/
 
 # Archived local outputs and scripts
 archive/
+!1-norm/archive/
+!1-norm/archive/*.csv
 data_local_unitary_list/
 notebook/
 data_Ising/

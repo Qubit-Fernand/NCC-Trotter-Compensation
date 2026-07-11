@@ -1,6 +1,6 @@
 # Channel Data Manifest
 
-Generated: 2026-07-09
+Generated: 2026-07-10
 
 Scope: channel checkpoints used by `scaling/plot_four_series_scaling.ipynb`.
 
@@ -21,6 +21,31 @@ Recent local fixes:
 - `NCC_channel_original_sampling_r_N8_T1_eps0.001_trials1000_repeats10` was rebuilt from the matching 4-repeat prefix and 6-repeat tail; the canonical JSON/NPZ now hold all 10 repeats.
 - `NCC_channel_log_sampling_r_N8_T2_eps0.04_trials1000_repeats10_q4_s4`, `eps0.02`, `eps0.01`, `eps0.005`, `eps0.0025`, and `eps0.001` were promoted from split sampled-only Bohrium/A100 outputs plus separate expected-search results.
 - The duplicate non-canonical `...T0.8...c16_m64_benchmark` files were removed from formal `scaling/data/`. A raw extracted copy remains under `.bohr/extracted/22657524/`.
+
+## Expected-Only Override Files
+
+These JSON/NPZ pairs expose the fields used by expected-only overrides.  The
+three entries marked **extracted from sampled** were not independently rerun:
+their `expected_r_min` and error value were copied from the named canonical
+sampled checkpoint, and their `searches` arrays are intentionally empty.  Do
+not treat them as independent evidence for the expected-r search.
+
+| File stem | Mode | `eps` | `expected_r_min` | Provenance |
+| --- | --- | ---: | ---: | --- |
+| `NCC_channel_original_expected_r_min_N8_T2_eps0.1` | original | 0.1 | 38 | **Extracted from sampled** `...eps0.1_trials1000_repeats10_standard_sampled.json` (sole recorded pair) |
+| `NCC_channel_original_expected_r_min_N8_T2_eps0.04` | original | 0.04 | 51 | standalone expected-only run |
+| `NCC_channel_original_expected_r_min_N8_T2_eps0.02` | original | 0.02 | 63 | standalone expected-only run |
+| `NCC_channel_original_expected_r_min_N8_T2_eps0.01` | original | 0.01 | 79 | standalone expected-only Bohrium run |
+| `NCC_channel_original_expected_r_min_N8_T2_eps0.005` | original | 0.005 | 99 | standalone expected-only Bohrium run |
+| `NCC_channel_original_expected_r_min_N8_T2_eps0.0025` | original | 0.0025 | 125 | monotone bracket: r124 full-256-basis fail; r125 Bohrium expected pass; r123 cross-check pending |
+| `NCC_channel_original_expected_r_min_N8_T2_eps0.001` | original | 0.001 | 169 | **Extracted from sampled** `...eps0.001_trials1000_repeats10_standard_sampled.json` (first of two recorded pairs at the same r) |
+| `NCC_channel_log_expected_r_min_N8_T2_eps0.1_q4_s4` | log | 0.1 | 21 | standalone expected-only run |
+| `NCC_channel_log_expected_r_min_N8_T2_eps0.04_q4_s4` | log | 0.04 | 26 | standalone expected-only run |
+| `NCC_channel_log_expected_r_min_N8_T2_eps0.02_q4_s4` | log | 0.02 | 31 | standalone expected-only run |
+| `NCC_channel_log_expected_r_min_N8_T2_eps0.01_q4_s4` | log | 0.01 | 32 | standalone expected-only run |
+| `NCC_channel_log_expected_r_min_N8_T2_eps0.005_q4_s4` | log | 0.005 | 43 | standalone expected-only run |
+| `NCC_channel_log_expected_r_min_N8_T2_eps0.0025_q4_s4` | log | 0.0025 | 51 | standalone expected-only run |
+| `NCC_channel_log_expected_r_min_N8_T2_eps0.001_q4_s4` | log | 0.001 | 63 | **Extracted from sampled** `...eps0.001_trials1000_repeats10_q4_s4_standard_sampled.json` (sole recorded pair) |
 
 ## Expected Plot Grid
 

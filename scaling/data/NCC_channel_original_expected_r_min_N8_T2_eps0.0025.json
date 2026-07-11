@@ -1,0 +1,67 @@
+{
+  "script": "NCC_channel_original_expected_r_min_cached_dump.py",
+  "mode": "original",
+  "params": {
+    "N": 8,
+    "J": 1.0,
+    "h": 1.0,
+    "T": 2.0,
+    "epsilon": 0.0025,
+    "r_max": 4096,
+    "expected_low": 124,
+    "expected_high": 125,
+    "expected_first": 125
+  },
+  "expected_r_min": 125,
+  "expectation_bias_at_min": 0.002462314,
+  "searches": [
+    {
+      "r": 112,
+      "expectation_bias": 0.002624605,
+      "pass": false,
+      "source": "Bohrium 23000680 preserved stdout"
+    },
+    {
+      "r": 119,
+      "expectation_bias": 0.0028558403292299516,
+      "worst_index": 85,
+      "pass": false,
+      "source": "A100 full-256-basis evaluator"
+    },
+    {
+      "r": 121,
+      "expectation_bias": 0.0027158942715113208,
+      "worst_index": 85,
+      "pass": false,
+      "source": "A100 full-256-basis evaluator"
+    },
+    {
+      "r": 122,
+      "expectation_bias": 0.002649345820685417,
+      "worst_index": 85,
+      "pass": false,
+      "source": "A100 full-256-basis evaluator"
+    },
+    {
+      "r": 124,
+      "expectation_bias": 0.0025226405661052526,
+      "worst_index": 85,
+      "pass": false,
+      "source": "A100 full-256-basis evaluator"
+    },
+    {
+      "r": 125,
+      "expectation_bias": 0.002462314,
+      "pass": true,
+      "source": "Bohrium 23000680 preserved stdout"
+    }
+  ],
+  "provenance": {
+    "resolution": "monotone bracket (124, 125]",
+    "threshold": 0.0025,
+    "r124_full_256_basis_result": "A100 result_r124_20260711.json",
+    "r125_result": "Bohrium job 23000680 preserved stdout: [expected] eval r=125",
+    "r123_crosscheck": "still running on Mac mini when this file was written",
+    "caveat": "expected_r_min=125 relies on the monotone-decrease assumption used by the binary search; r123 is retained as an independent consistency check"
+  }
+}

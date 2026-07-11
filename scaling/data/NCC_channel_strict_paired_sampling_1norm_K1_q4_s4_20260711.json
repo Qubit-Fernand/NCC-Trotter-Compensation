@@ -1,0 +1,776 @@
+{
+  "definition": {
+    "K": 1,
+    "q0": 4,
+    "s0": 4,
+    "strict_pairing": "original pairs Phi_2,Phi_3; HNCC pairs Phi_2,Phi_3,Phi_4 and leaves (ad_Phi_2)^2/2 as the Taylor tail",
+    "x": "T/r"
+  },
+  "static_coefficients": {
+    "8": {
+      "a2_original": 64.0,
+      "a3_original": 415.99999999999983,
+      "a2_log": 64.0,
+      "a3_log": 415.9999999999999,
+      "a4_log": 1525.3333333333335,
+      "sources": {
+        "original": "static_cache",
+        "log": "static_cache"
+      }
+    },
+    "4": {
+      "a2_original": 32.0,
+      "a3_original": 176.0,
+      "a2_log": 32.0,
+      "a3_log": 176.0,
+      "a4_log": 426.6666666666667,
+      "sources": {
+        "original": "built_from_static_source",
+        "log": "built_from_static_source"
+      }
+    },
+    "6": {
+      "a2_original": 48.0,
+      "a3_original": 312.0,
+      "a2_log": 48.0,
+      "a3_log": 311.99999999999994,
+      "a4_log": 1144.0,
+      "sources": {
+        "original": "built_from_static_source",
+        "log": "built_from_static_source"
+      }
+    }
+  },
+  "rows": [
+    {
+      "mode": "log",
+      "priority": 3,
+      "N": 4,
+      "T": 2.0,
+      "epsilon": 0.001,
+      "r": 58.0,
+      "source_file": "NCC_channel_log_sampling_r_N4_T2_eps0.001_trials1000_repeats10_q4_s4.json",
+      "repeats": 10,
+      "trials": 1000,
+      "axes": [
+        "N"
+      ],
+      "x": 0.034482758620689655,
+      "a": {
+        "a2": 32.0,
+        "a3": 176.0,
+        "a4": 426.6666666666667
+      },
+      "pair_eta": 0.045869557738249245,
+      "tail_one_step_1norm": 0.002895595951255583,
+      "one_step_1norm": 1.0071036286054607,
+      "log_total_1norm": 0.410553967988757,
+      "total_1norm": 1.5076527451799175,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3 + a4 x^4)^2 + 2 a2^2 x^4]^r"
+    },
+    {
+      "mode": "original",
+      "priority": 3,
+      "N": 4,
+      "T": 2.0,
+      "epsilon": 0.001,
+      "r": 148.0,
+      "source_file": "NCC_channel_original_sampling_r_N4_T2_eps0.001_trials1000_repeats10.json",
+      "repeats": 10,
+      "trials": 1000,
+      "axes": [
+        "N"
+      ],
+      "x": 0.013513513513513514,
+      "a": {
+        "a2": 32.0,
+        "a3": 176.0,
+        "a4": 426.6666666666667
+      },
+      "pair_eta": 0.0062780091998499606,
+      "tail_one_step_1norm": 0.0,
+      "one_step_1norm": 1.0000788267990268,
+      "log_total_1norm": 0.011665906468977591,
+      "total_1norm": 1.01173421853814,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3)^2]^r"
+    },
+    {
+      "mode": "log",
+      "priority": 3,
+      "N": 6,
+      "T": 2.0,
+      "epsilon": 0.001,
+      "r": 58.0,
+      "source_file": "NCC_channel_log_sampling_r_N6_T2_eps0.001_trials1000_repeats10_q4_s4.json",
+      "repeats": 10,
+      "trials": 1000,
+      "axes": [
+        "N"
+      ],
+      "x": 0.034482758620689655,
+      "a": {
+        "a2": 48.0,
+        "a3": 311.99999999999994,
+        "a4": 1144.0
+      },
+      "pair_eta": 0.07148502504662219,
+      "tail_one_step_1norm": 0.006515090890325061,
+      "one_step_1norm": 1.0167353085021575,
+      "log_total_1norm": 0.9626153414310292,
+      "total_1norm": 2.6185358912232286,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3 + a4 x^4)^2 + 2 a2^2 x^4]^r"
+    },
+    {
+      "mode": "original",
+      "priority": 3,
+      "N": 6,
+      "T": 2.0,
+      "epsilon": 0.001,
+      "r": 153.0,
+      "source_file": "NCC_channel_original_sampling_r_N6_T2_eps0.001_trials1000_repeats10.json",
+      "repeats": 10,
+      "trials": 1000,
+      "axes": [
+        "N"
+      ],
+      "x": 0.013071895424836602,
+      "a": {
+        "a2": 48.0,
+        "a3": 311.99999999999994,
+        "a4": 1144.0
+      },
+      "pair_eta": 0.008898873317535824,
+      "tail_one_step_1norm": 0.0,
+      "one_step_1norm": 1.000158379892643,
+      "log_total_1norm": 0.02423020483640443,
+      "total_1norm": 1.024526141618522,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3)^2]^r"
+    },
+    {
+      "mode": "log",
+      "priority": 3,
+      "N": 8,
+      "T": 0.2,
+      "epsilon": 0.001,
+      "r": 5.0,
+      "source_file": "NCC_channel_log_sampling_r_N8_T0.2_eps0.001_trials1000_repeats10_q4_s4.json",
+      "repeats": 10,
+      "trials": 1000,
+      "axes": [
+        "T"
+      ],
+      "x": 0.04,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.13292885333333335,
+      "tail_one_step_1norm": 0.02097152,
+      "one_step_1norm": 1.0563116800970298,
+      "log_total_1norm": 0.2739164667121936,
+      "total_1norm": 1.3151049426106538,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3 + a4 x^4)^2 + 2 a2^2 x^4]^r"
+    },
+    {
+      "mode": "log",
+      "priority": 3,
+      "N": 8,
+      "T": 0.4,
+      "epsilon": 0.001,
+      "r": 10.0,
+      "source_file": "NCC_channel_log_sampling_r_N8_T0.4_eps0.001_trials1000_repeats10_q4_s4.json",
+      "repeats": 10,
+      "trials": 1000,
+      "axes": [
+        "T"
+      ],
+      "x": 0.04,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.13292885333333335,
+      "tail_one_step_1norm": 0.02097152,
+      "one_step_1norm": 1.0563116800970298,
+      "log_total_1norm": 0.5478329334243872,
+      "total_1norm": 1.7295010100789707,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3 + a4 x^4)^2 + 2 a2^2 x^4]^r"
+    },
+    {
+      "mode": "log",
+      "priority": 3,
+      "N": 8,
+      "T": 0.6,
+      "epsilon": 0.001,
+      "r": 16.0,
+      "source_file": "NCC_channel_log_sampling_r_N8_T0.6_eps0.001_trials1000_repeats10_q4_s4.json",
+      "repeats": 10,
+      "trials": 1000,
+      "axes": [
+        "T"
+      ],
+      "x": 0.0375,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.11495390625,
+      "tail_one_step_1norm": 0.0162,
+      "one_step_1norm": 1.0426288011242675,
+      "log_total_1norm": 0.6679234767715642,
+      "total_1norm": 1.9501835118165025,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3 + a4 x^4)^2 + 2 a2^2 x^4]^r"
+    },
+    {
+      "mode": "log",
+      "priority": 3,
+      "N": 8,
+      "T": 0.8,
+      "epsilon": 0.001,
+      "r": 22.0,
+      "source_file": "NCC_channel_log_sampling_r_N8_T0.8_eps0.001_trials1000_repeats10_q4_s4.json",
+      "repeats": 10,
+      "trials": 1000,
+      "axes": [
+        "T"
+      ],
+      "x": 0.03636363636363637,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.10729817180065117,
+      "tail_one_step_1norm": 0.014323830339457696,
+      "one_step_1norm": 1.0373496256829817,
+      "log_total_1norm": 0.8067185173803647,
+      "total_1norm": 2.240543605340714,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3 + a4 x^4)^2 + 2 a2^2 x^4]^r"
+    },
+    {
+      "mode": "log",
+      "priority": 3,
+      "N": 8,
+      "T": 1.0,
+      "epsilon": 0.001,
+      "r": 29.0,
+      "source_file": "NCC_channel_log_sampling_r_N8_T1_eps0.001_trials1000_repeats10_q4_s4.json",
+      "repeats": 10,
+      "trials": 1000,
+      "axes": [
+        "T"
+      ],
+      "x": 0.034482758620689655,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.09531336672882959,
+      "tail_one_step_1norm": 0.011582383805022332,
+      "one_step_1norm": 1.0297516595593912,
+      "log_total_1norm": 0.8502123124523491,
+      "total_1norm": 2.3401436408221223,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3 + a4 x^4)^2 + 2 a2^2 x^4]^r"
+    },
+    {
+      "mode": "log",
+      "priority": 4,
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.001,
+      "r": 63.0,
+      "source_file": "NCC_channel_log_expected_r_min_N8_T2_eps0.001_q4_s4.json",
+      "repeats": 10,
+      "trials": 1000,
+      "axes": [
+        "T",
+        "inv_epsilon"
+      ],
+      "x": 0.031746031746031744,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.0793586255519412,
+      "tail_one_step_1norm": 0.008320467498142093,
+      "one_step_1norm": 1.0209160503971284,
+      "log_total_1norm": 1.3041197114727037,
+      "total_1norm": 3.684444291694119,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3 + a4 x^4)^2 + 2 a2^2 x^4]^r"
+    },
+    {
+      "mode": "log",
+      "priority": 4,
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.0025,
+      "r": 51.0,
+      "source_file": "NCC_channel_log_expected_r_min_N8_T2_eps0.0025_q4_s4.json",
+      "repeats": 10,
+      "trials": 0,
+      "axes": [
+        "inv_epsilon"
+      ],
+      "x": 0.0392156862745098,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.1271195539250546,
+      "tail_one_step_1norm": 0.019374442828823564,
+      "one_step_1norm": 1.0516932048090333,
+      "log_total_1norm": 2.570473510045269,
+      "total_1norm": 13.072012705044047,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3 + a4 x^4)^2 + 2 a2^2 x^4]^r"
+    },
+    {
+      "mode": "log",
+      "priority": 4,
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.005,
+      "r": 43.0,
+      "source_file": "NCC_channel_log_expected_r_min_N8_T2_eps0.005_q4_s4.json",
+      "repeats": 10,
+      "trials": 0,
+      "axes": [
+        "inv_epsilon"
+      ],
+      "x": 0.046511627906976744,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.18744973262068582,
+      "tail_one_step_1norm": 0.03833858712455039,
+      "one_step_1norm": 1.1086133916436836,
+      "log_total_1norm": 4.433731621539651,
+      "total_1norm": 84.24520229349034,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3 + a4 x^4)^2 + 2 a2^2 x^4]^r"
+    },
+    {
+      "mode": "log",
+      "priority": 4,
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.01,
+      "r": 32.0,
+      "source_file": "NCC_channel_log_expected_r_min_N8_T2_eps0.01_q4_s4.json",
+      "repeats": 10,
+      "trials": 0,
+      "axes": [
+        "inv_epsilon"
+      ],
+      "x": 0.0625,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.3748372395833333,
+      "tail_one_step_1norm": 0.125,
+      "one_step_1norm": 1.4060059123569064,
+      "log_total_1norm": 10.904095951036558,
+      "total_1norm": 54398.72260467113,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3 + a4 x^4)^2 + 2 a2^2 x^4]^r"
+    },
+    {
+      "mode": "log",
+      "priority": 4,
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.02,
+      "r": 31.0,
+      "source_file": "NCC_channel_log_expected_r_min_N8_T2_eps0.02_q4_s4.json",
+      "repeats": 10,
+      "trials": 0,
+      "axes": [
+        "inv_epsilon"
+      ],
+      "x": 0.06451612903225806,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.40452716650009396,
+      "tail_one_step_1norm": 0.14192638824672096,
+      "one_step_1norm": 1.4692108451199104,
+      "log_total_1norm": 11.92648791416437,
+      "total_1norm": 151219.5319827043,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3 + a4 x^4)^2 + 2 a2^2 x^4]^r"
+    },
+    {
+      "mode": "log",
+      "priority": 4,
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.04,
+      "r": 26.0,
+      "source_file": "NCC_channel_log_expected_r_min_N8_T2_eps0.04_q4_s4.json",
+      "repeats": 10,
+      "trials": 0,
+      "axes": [
+        "inv_epsilon"
+      ],
+      "x": 0.07692307692307693,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.6214534971931422,
+      "tail_one_step_1norm": 0.2868246910122195,
+      "one_step_1norm": 2.059233589359393,
+      "log_total_1norm": 18.780680608967046,
+      "total_1norm": 143332922.10819244,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3 + a4 x^4)^2 + 2 a2^2 x^4]^r"
+    },
+    {
+      "mode": "log",
+      "priority": 4,
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.1,
+      "r": 21.0,
+      "source_file": "NCC_channel_log_expected_r_min_N8_T2_eps0.1_q4_s4.json",
+      "repeats": 10,
+      "trials": 0,
+      "axes": [
+        "inv_epsilon"
+      ],
+      "x": 0.09523809523809523,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 1.065344858023834,
+      "tail_one_step_1norm": 0.6739578673495096,
+      "one_step_1norm": 3.943877200385156,
+      "log_total_1norm": 28.815450309464257,
+      "total_1norm": 3268820425011.8438,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3 + a4 x^4)^2 + 2 a2^2 x^4]^r"
+    },
+    {
+      "mode": "original",
+      "priority": 3,
+      "N": 8,
+      "T": 0.2,
+      "epsilon": 0.001,
+      "r": 9.0,
+      "source_file": "NCC_channel_original_sampling_r_N8_T0.2_eps0.001_trials1000_repeats10.json",
+      "repeats": 10,
+      "trials": 1000,
+      "axes": [
+        "T"
+      ],
+      "x": 0.022222222222222223,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.03617009602194787,
+      "tail_one_step_1norm": 0.0,
+      "one_step_1norm": 1.0026165516924739,
+      "log_total_1norm": 0.02351821032603422,
+      "total_1norm": 1.0237969442530241,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3)^2]^r"
+    },
+    {
+      "mode": "original",
+      "priority": 3,
+      "N": 8,
+      "T": 0.4,
+      "epsilon": 0.001,
+      "r": 21.0,
+      "source_file": "NCC_channel_original_sampling_r_N8_T0.4_eps0.001_trials1000_repeats10.json",
+      "repeats": 10,
+      "trials": 1000,
+      "axes": [
+        "T"
+      ],
+      "x": 0.01904761904761905,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.026094806176438834,
+      "tail_one_step_1norm": 0.0,
+      "one_step_1norm": 1.0013618778187718,
+      "log_total_1norm": 0.028579977389869504,
+      "total_1norm": 1.02899230366234,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3)^2]^r"
+    },
+    {
+      "mode": "original",
+      "priority": 3,
+      "N": 8,
+      "T": 0.6,
+      "epsilon": 0.001,
+      "r": 34.0,
+      "source_file": "NCC_channel_original_sampling_r_N8_T0.6_eps0.001_trials1000_repeats10.json",
+      "repeats": 10,
+      "trials": 1000,
+      "axes": [
+        "T"
+      ],
+      "x": 0.01764705882352941,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.022216975371463464,
+      "tail_one_step_1norm": 0.0,
+      "one_step_1norm": 1.0009871879893124,
+      "log_total_1norm": 0.033547835349691656,
+      "total_1norm": 1.03411690988716,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3)^2]^r"
+    },
+    {
+      "mode": "original",
+      "priority": 3,
+      "N": 8,
+      "T": 0.8,
+      "epsilon": 0.001,
+      "r": 51.0,
+      "source_file": "NCC_channel_original_sampling_r_N8_T0.8_eps0.001_trials1000_repeats10.json",
+      "repeats": 10,
+      "trials": 1000,
+      "axes": [
+        "T"
+      ],
+      "x": 0.01568627450980392,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.017353446261241905,
+      "tail_one_step_1norm": 0.0,
+      "one_step_1norm": 1.0006022841942837,
+      "log_total_1norm": 0.03070724759149464,
+      "total_1norm": 1.0311835782178114,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3)^2]^r"
+    },
+    {
+      "mode": "original",
+      "priority": 3,
+      "N": 8,
+      "T": 1.0,
+      "epsilon": 0.001,
+      "r": 68.0,
+      "source_file": "NCC_channel_original_sampling_r_N8_T1_eps0.001_trials1000_repeats10.json",
+      "repeats": 10,
+      "trials": 1000,
+      "axes": [
+        "T"
+      ],
+      "x": 0.014705882352941176,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.01516385100753104,
+      "tail_one_step_1norm": 0.0,
+      "one_step_1norm": 1.0004598847547572,
+      "log_total_1norm": 0.03126497473177548,
+      "total_1norm": 1.031758857695572,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3)^2]^r"
+    },
+    {
+      "mode": "original",
+      "priority": 4,
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.001,
+      "r": 169.0,
+      "source_file": "NCC_channel_original_expected_r_min_N8_T2_eps0.001.json",
+      "repeats": 10,
+      "trials": 1000,
+      "axes": [
+        "T",
+        "inv_epsilon"
+      ],
+      "x": 0.011834319526627219,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.009652754024449694,
+      "tail_one_step_1norm": 0.0,
+      "one_step_1norm": 1.0001863513205131,
+      "log_total_1norm": 0.0314904391153869,
+      "total_1norm": 1.031991508796741,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3)^2]^r"
+    },
+    {
+      "mode": "original",
+      "priority": 4,
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.0025,
+      "r": 125.0,
+      "source_file": "NCC_channel_original_expected_r_min_N8_T2_eps0.0025.json",
+      "repeats": 1,
+      "trials": 0,
+      "axes": [
+        "inv_epsilon"
+      ],
+      "x": 0.016,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.018087936,
+      "tail_one_step_1norm": 0.0,
+      "one_step_1norm": 1.0006543468574802,
+      "log_total_1norm": 0.08176660823999918,
+      "total_1norm": 1.0852025029487091,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3)^2]^r"
+    },
+    {
+      "mode": "original",
+      "priority": 4,
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.005,
+      "r": 99.0,
+      "source_file": "NCC_channel_original_expected_r_min_N8_T2_eps0.005.json",
+      "repeats": 1,
+      "trials": 0,
+      "axes": [
+        "inv_epsilon"
+      ],
+      "x": 0.020202020202020204,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.02954965428182447,
+      "tail_one_step_1norm": 0.0,
+      "one_step_1norm": 1.0017463641363507,
+      "log_total_1norm": 0.17273926053715807,
+      "total_1norm": 1.1885561611834607,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3)^2]^r"
+    },
+    {
+      "mode": "original",
+      "priority": 4,
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.01,
+      "r": 79.0,
+      "source_file": "NCC_channel_original_expected_r_min_N8_T2_eps0.01.json",
+      "repeats": 1,
+      "trials": 0,
+      "axes": [
+        "inv_epsilon"
+      ],
+      "x": 0.02531645569620253,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.047769040582996476,
+      "tail_one_step_1norm": 0.0,
+      "one_step_1norm": 1.0045637624764399,
+      "log_total_1norm": 0.35971702702981406,
+      "total_1norm": 1.4329238784592309,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3)^2]^r"
+    },
+    {
+      "mode": "original",
+      "priority": 4,
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.02,
+      "r": 63.0,
+      "source_file": "NCC_channel_original_expected_r_min_N8_T2_eps0.02.json",
+      "repeats": 1,
+      "trials": 0,
+      "axes": [
+        "inv_epsilon"
+      ],
+      "x": 0.031746031746031744,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.07780937183809443,
+      "tail_one_step_1norm": 0.0,
+      "one_step_1norm": 1.0121085966916776,
+      "log_total_1norm": 0.7582600677927134,
+      "total_1norm": 2.1345589996266394,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3)^2]^r"
+    },
+    {
+      "mode": "original",
+      "priority": 4,
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.04,
+      "r": 51.0,
+      "source_file": "NCC_channel_original_expected_r_min_N8_T2_eps0.04.json",
+      "repeats": 1,
+      "trials": 0,
+      "axes": [
+        "inv_epsilon"
+      ],
+      "x": 0.0392156862745098,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.12351207303375021,
+      "tail_one_step_1norm": 0.0,
+      "one_step_1norm": 1.0305104643701888,
+      "log_total_1norm": 1.5327680734542202,
+      "total_1norm": 4.63097798407274,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3)^2]^r"
+    },
+    {
+      "mode": "original",
+      "priority": 4,
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.1,
+      "r": 38.0,
+      "source_file": "NCC_channel_original_expected_r_min_N8_T2_eps0.1.json",
+      "repeats": 10,
+      "trials": 1000,
+      "axes": [
+        "inv_epsilon"
+      ],
+      "x": 0.05263157894736842,
+      "a": {
+        "a2": 64.0,
+        "a3": 415.9999999999999,
+        "a4": 1525.3333333333335
+      },
+      "pair_eta": 0.23793555911940512,
+      "tail_one_step_1norm": 0.0,
+      "one_step_1norm": 1.1132266605869279,
+      "log_total_1norm": 4.075982595667354,
+      "total_1norm": 58.908335234802834,
+      "formula": "[1 + 2(a2 x^2 + a3 x^3)^2]^r"
+    }
+  ]
+}

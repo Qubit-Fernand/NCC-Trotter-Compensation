@@ -182,7 +182,7 @@ the first six repeats' search trajectories.
 ## Sample Bracket Guide
 
 The following bracket guide is copied from
-`.bohr/cache/SAMPLE_BRACKET_GUIDE.md`.
+`cache/SAMPLE_BRACKET_GUIDE.md`.
 
 ### NCC Channel Log Sample Bracket Guide
 
