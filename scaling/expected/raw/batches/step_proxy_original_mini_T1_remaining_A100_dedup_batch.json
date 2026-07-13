@@ -1,0 +1,48 @@
+{
+  "defaults": {
+    "mode": "original",
+    "out_dir": "scaling/expected",
+    "J": 1.0,
+    "h": 1.0,
+    "r_max": 4096,
+    "save_every_search": true
+  },
+  "cases": [
+    {
+      "N": 8,
+      "T": 1.0,
+      "epsilon": 0.01,
+      "tag": "step_proxy_original_mini_eps_T1"
+    },
+    {
+      "N": 8,
+      "T": 1.0,
+      "epsilon": 0.005,
+      "tag": "step_proxy_original_mini_eps_T1"
+    },
+    {
+      "N": 8,
+      "T": 1.0,
+      "epsilon": 0.0025,
+      "tag": "step_proxy_original_mini_eps_T1"
+    },
+    {
+      "N": 8,
+      "T": 1.0,
+      "epsilon": 0.001,
+      "tag": "step_proxy_original_mini_eps_T1"
+    },
+    {
+      "N": 4,
+      "T": 1.0,
+      "epsilon": 0.001,
+      "tag": "step_proxy_original_mini_N_T1"
+    },
+    {
+      "N": 6,
+      "T": 1.0,
+      "epsilon": 0.001,
+      "tag": "step_proxy_original_mini_N_T1"
+    }
+  ]
+}

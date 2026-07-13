@@ -1,0 +1,133 @@
+{
+  "script": "NCC_channel_step_proxy_r_min_cached.py",
+  "mode": "log",
+  "norm": "trace",
+  "criterion": "r * max_z ||E_step(T/r)(|z><z|) - U_step(T/r)(|z><z|)||",
+  "params": {
+    "N": 8,
+    "J": 1.0,
+    "h": 1.0,
+    "T": 1.0,
+    "epsilon": 0.04,
+    "r_max": 4096,
+    "s0": 4,
+    "q0": 4
+  },
+  "step_proxy_r_min": 16,
+  "step_error_at_min": 0.002034389147340326,
+  "total_proxy_error_at_min": 0.032550226357445214,
+  "searches": [
+    {
+      "r": 1,
+      "step_error": 522.6062277395256,
+      "total_proxy_error": 522.6062277395256,
+      "worst_index": 170,
+      "norm": "trace",
+      "eta_pair_sum": 479.9999999999999,
+      "pair_scale": 960.0005208332376,
+      "raw_l1_norm_total": 12202.667187499905,
+      "accumulated_l1_norm": 12202.667187499914,
+      "log_accumulated_l1_norm": 9.40940982875328
+    },
+    {
+      "r": 2,
+      "step_error": 32.314181039026664,
+      "total_proxy_error": 64.62836207805333,
+      "worst_index": 170,
+      "norm": "trace",
+      "eta_pair_sum": 67.99999999999999,
+      "pair_scale": 136.0036764208966,
+      "raw_l1_norm_total": 838.6703430875633,
+      "accumulated_l1_norm": 703367.9443746115,
+      "log_accumulated_l1_norm": 13.463635425584663
+    },
+    {
+      "r": 4,
+      "step_error": 1.4317983614854073,
+      "total_proxy_error": 5.727193445941629,
+      "worst_index": 170,
+      "norm": "trace",
+      "eta_pair_sum": 10.499999999999998,
+      "pair_scale": 21.02379604162858,
+      "raw_l1_norm_total": 64.94046270829526,
+      "accumulated_l1_norm": 17785313.088072967,
+      "log_accumulated_l1_norm": 16.6938835672622
+    },
+    {
+      "r": 8,
+      "step_error": 0.06037264300455744,
+      "total_proxy_error": 0.48298114403645953,
+      "worst_index": 85,
+      "norm": "trace",
+      "eta_pair_sum": 1.8124999999999998,
+      "pair_scale": 3.7604022391228296,
+      "raw_l1_norm_total": 6.505193905789497,
+      "accumulated_l1_norm": 3206874.5552842477,
+      "log_accumulated_l1_norm": 14.98080736200262
+    },
+    {
+      "r": 16,
+      "step_error": 0.002034389147340326,
+      "total_proxy_error": 0.032550226357445214,
+      "worst_index": 85,
+      "norm": "trace",
+      "eta_pair_sum": 0.3515625,
+      "pair_scale": 1.2224503121292905,
+      "raw_l1_norm_total": 1.393999791295957,
+      "accumulated_l1_norm": 203.3308798180489,
+      "log_accumulated_l1_norm": 5.314834601957835
+    },
+    {
+      "r": 12,
+      "step_error": 0.008437933858049508,
+      "total_proxy_error": 0.1012552062965941,
+      "worst_index": 85,
+      "norm": "trace",
+      "eta_pair_sum": 0.685185185185185,
+      "pair_scale": 1.6964418504590795,
+      "raw_l1_norm_total": 2.2386229204179275,
+      "accumulated_l1_norm": 15840.589962640448,
+      "log_accumulated_l1_norm": 9.670330909791025
+    },
+    {
+      "r": 14,
+      "step_error": 0.0039433206622918136,
+      "total_proxy_error": 0.05520648927208539,
+      "worst_index": 85,
+      "norm": "trace",
+      "eta_pair_sum": 0.47813411078717194,
+      "pair_scale": 1.457224455796479,
+      "raw_l1_norm_total": 1.749880293641821,
+      "accumulated_l1_norm": 2524.159329536459,
+      "log_accumulated_l1_norm": 7.833663347475592
+    },
+    {
+      "r": 15,
+      "step_error": 0.002802009515999124,
+      "total_proxy_error": 0.042030142739986856,
+      "worst_index": 85,
+      "norm": "trace",
+      "eta_pair_sum": 0.4077037037037037,
+      "pair_scale": 1.3324446200274347,
+      "raw_l1_norm_total": 1.5545219862825788,
+      "accumulated_l1_norm": 748.0885929949009,
+      "log_accumulated_l1_norm": 6.617521410793789
+    }
+  ],
+  "worst_index_at_min": 85,
+  "raw_l1_norm_total_at_min": 1.393999791295957,
+  "accumulated_l1_norm_at_min": 203.3308798180489,
+  "log_accumulated_l1_norm_at_min": 5.314834601957835,
+  "canonical_id": "NCC_channel_log_step_proxy_r_min_trace_N8_T1_eps0.04_q4_s4_eps_T1",
+  "sweep_id": "eps_T1",
+  "source_host": "Mac mini",
+  "provenance": {
+    "canonicalized_on": "2026-07-13",
+    "source_json": "raw/checkpoints/NCC_channel_log_step_proxy_r_min_trace_N8_T1_eps0.04_q4_s4_step_proxy_mini_eps_T1.json",
+    "source_npz": "raw/checkpoints/NCC_channel_log_step_proxy_r_min_trace_N8_T1_eps0.04_q4_s4_step_proxy_mini_eps_T1.npz",
+    "source_tag": "step_proxy_mini_eps_T1",
+    "source_host": "Mac mini",
+    "note": "Ran on Mac mini.",
+    "alternative_raw_json": []
+  }
+}

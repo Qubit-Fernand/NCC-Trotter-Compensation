@@ -53,6 +53,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--x-min", type=float, default=1e-3, help="Minimum step size in interpolation grid.")
     parser.add_argument("--x-max", type=float, default=1.0, help="Maximum step size in interpolation grid.")
     parser.add_argument("--num-x", type=int, default=40, help="Number of interpolation-grid points.")
+    parser.add_argument("--error-norm", choices=h.ERROR_NORMS, default="trace", help="Basis-state density-matrix error norm.")
     parser.add_argument("--scan", choices=("eps", "time", "both"), default="both", help="Which scans to collect.")
     parser.add_argument("--output-dir", type=Path, default=Path("resource/data/split_constraints"), help="Output directory.")
     parser.add_argument(
@@ -133,15 +134,26 @@ def row(method: str, scan_value: float, eps: float, time: float, steps: int, x: 
     }
 
 
-def output_path(output_dir: Path, n: int) -> Path:
-    return output_dir / f"r_for_expected_precision_N{n}.json"
+def error_norm_suffix(error_norm: str) -> str:
+    return "" if error_norm == "fro" else f"_{error_norm}"
 
 
-def seeded_precision_payload(path: Path, n: int) -> dict[str, object]:
+def output_path(output_dir: Path, n: int, error_norm: str) -> Path:
+    return output_dir / f"r_for_expected_precision_N{n}{error_norm_suffix(error_norm)}.json"
+
+
+def seeded_precision_payload(path: Path, n: int, error_norm: str) -> dict[str, object]:
     source = json.loads(path.read_text(encoding="utf-8"))
     metadata = dict(source.get("metadata", {}))
+    source_error_norm = metadata.get("error_norm", "fro")
+    if source_error_norm != error_norm:
+        raise ValueError(
+            f"--seed-final source has error_norm={source_error_norm!r}, "
+            f"but requested {error_norm!r}."
+        )
     metadata["constraint"] = "expected_precision"
     metadata["seed_final"] = str(path)
+    metadata["error_norm"] = error_norm
 
     def convert(row_data: Mapping[str, object], eps: float, time: float) -> dict[str, object]:
         return row(
@@ -196,16 +208,17 @@ def main() -> None:
         if len(args.n_values) != 1:
             raise ValueError("--seed-final expects exactly one --N value.")
         n = args.n_values[0]
-        path = output_path(args.output_dir, n)
-        path.write_text(json.dumps(seeded_precision_payload(args.seed_final, n), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        path = output_path(args.output_dir, n, args.error_norm)
+        path.write_text(json.dumps(seeded_precision_payload(args.seed_final, n, args.error_norm), indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(f"Saved {path} from {args.seed_final}")
         return
 
     for n in args.n_values:
-        result = h.build_estimate(n, formula_orders, args.hncc_orders, args.ncc_orders, q0_by_order, s0_by_order, x_grid)
+        result = h.build_estimate(n, formula_orders, args.hncc_orders, args.ncc_orders, q0_by_order, s0_by_order, x_grid, args.error_norm)
         payload: dict[str, object] = {
             "metadata": {
                 "constraint": "expected_precision",
+                "error_norm": args.error_norm,
                 "n_values": [n],
                 "orders": args.orders,
                 "ncc_orders": args.ncc_orders,
@@ -241,7 +254,7 @@ def main() -> None:
                 )
                 for time_value in args.time_values
             }
-        path = output_path(args.output_dir, n)
+        path = output_path(args.output_dir, n, args.error_norm)
         path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(f"Saved {path}")
 

@@ -49,6 +49,14 @@ def cap_label(cap: float) -> str:
     return f"{cap:g}".replace(".", "p")
 
 
+def error_norm_suffix(error_norm: str) -> str:
+    return "" if error_norm == "fro" else f"_{error_norm}"
+
+
+def precision_file_name(n: int, error_norm: str) -> str:
+    return f"r_for_expected_precision_N{n}{error_norm_suffix(error_norm)}.json"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--N", dest="n_values", nargs="+", type=int, default=[8, 10], help="Even system sizes.")
@@ -67,6 +75,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--x-min", type=float, default=1e-3, help="Minimum step size in interpolation grid.")
     parser.add_argument("--x-max", type=float, default=1.0, help="Maximum step size in interpolation grid.")
     parser.add_argument("--num-x", type=int, default=40, help="Number of interpolation-grid points.")
+    parser.add_argument("--precision-error-norm", choices=h.ERROR_NORMS, default="trace", help="Error norm used by the expected-precision input file.")
     parser.add_argument("--scan", choices=("eps", "time", "both"), default="both", help="Which scans to merge.")
     parser.add_argument("--input-dir", type=Path, default=Path("resource/data/split_constraints"), help="Directory containing split constraint JSON files.")
     parser.add_argument("--output-dir", type=Path, default=Path("resource/data/split_constraints"), help="Output directory.")
@@ -74,6 +83,11 @@ def parse_args() -> argparse.Namespace:
         "--use-reference-final",
         action="store_true",
         help="Use existing legacy final data for costs/bias and add split provenance fields, avoiding dense step-error recomputation.",
+    )
+    parser.add_argument(
+        "--skip-final-bias-recompute",
+        action="store_true",
+        help="Use bias_precision from the expected-precision file after merging r=max(r_precision,r_1_norm). Fails if the 1-norm constraint increases r.",
     )
     parser.add_argument("--reference-dir", type=Path, default=Path("resource/data"), help="Directory containing legacy final resource JSON files.")
     return parser.parse_args()
@@ -142,7 +156,7 @@ def add_split_provenance(
     out = json.loads(json.dumps(final_payload))
     metadata = dict(out.get("metadata", {}))
     metadata["source"] = "split_constraints_reference_final"
-    metadata["expected_precision_file"] = f"r_for_expected_precision_N{n}.json"
+    metadata["expected_precision_file"] = precision_file_name(n, str(precision_payload.get("metadata", {}).get("error_norm", "fro")))
     metadata["one_norm_file"] = f"r_for_1_norm_N{n}_cap_{cap_label(cap)}.json"
     out["metadata"] = metadata
 
@@ -184,6 +198,53 @@ def comp_bias(result: h.EstimateResult, method: str, steps: int, x: float) -> fl
     raise ValueError(f"unsupported compensation method {method}")
 
 
+def build_resource_skeleton(
+    n: int,
+    formula_orders: Sequence[int],
+    hncc_orders: Sequence[int],
+    ncc_orders: Sequence[int],
+    q0_by_order: Mapping[int, int],
+    s0_by_order: Mapping[int, int],
+    x_grid: np.ndarray,
+    error_norm: str,
+) -> h.EstimateResult:
+    a_op, b_op, _ = h.heisenberg_even_odd(n)
+    formula_orders = tuple(sorted(set(formula_orders) | set(hncc_orders) | set(ncc_orders)))
+    formula_layers = {order: h.suzuki_layers(order) for order in formula_orders}
+    ncc_data: dict[int, h.NccData] = {}
+    hncc_data: dict[int, h.HnccData] = {}
+    for order in sorted(set(hncc_orders) | set(ncc_orders)):
+        lead = order + 1
+        hncc_q0 = q0_by_order[order] if order in hncc_orders else lead
+        ncc_q0 = 2 * order + 1 if order in ncc_orders else lead
+        qmax = max(hncc_q0, ncc_q0)
+        omega_poly = h.remainder_log_pauli_poly(a_op, b_op, order, qmax, n)
+        norms_all = {q: h.op_norm1(omega_poly.get(q, {})) for q in range(lead, qmax + 1)}
+        if order in ncc_orders:
+            ncc_norms = {q: norms_all[q] for q in range(lead, ncc_q0 + 1)}
+            ncc_data[order] = h.NccData(order, lead, ncc_q0, omega_poly, {}, ncc_norms, np.array([]))
+        if order in hncc_orders:
+            q0 = q0_by_order[order]
+            s0 = s0_by_order[order]
+            hncc_norms = {q: norms_all[q] for q in range(lead, q0 + 1)}
+            norm_poly = h.hncc_norm_poly(hncc_norms, lead, q0, s0)
+            hncc_data[order] = h.HnccData(order, lead, q0, s0, omega_poly, {}, hncc_norms, norm_poly, np.array([]))
+    return h.EstimateResult(
+        n=n,
+        a_op=a_op,
+        b_op=b_op,
+        a_eigh=(np.array([]), np.array([[]])),
+        b_eigh=(np.array([]), np.array([[]])),
+        h_eigh=(np.array([]), np.array([[]])),
+        formula_layers=formula_layers,
+        formula_errors={},
+        hncc=hncc_data,
+        ncc=ncc_data,
+        x_grid=x_grid,
+        error_norm=error_norm,
+    )
+
+
 def final_row(
     result: h.EstimateResult,
     precision_row: Mapping[str, object],
@@ -203,7 +264,12 @@ def final_row(
     if method.startswith("S"):
         order = int(method.removeprefix("S"))
         x = time / steps
-        bias = steps * h.log_interpolate_error(result.x_grid, result.formula_errors[order], x)
+        if steps == r_precision:
+            bias = float(precision_row["bias_precision"])
+        else:
+            if order not in result.formula_errors:
+                raise RuntimeError(f"{method} needs final-bias recomputation at r={steps}, but no error curve is available.")
+            bias = steps * h.log_interpolate_error(result.x_grid, result.formula_errors[order], x)
         norm_overhead = 1.0
         cost = h.layer_sequence_gate_cost(result.formula_layers[order], steps, a_cost, b_cost)
         row = h.ResourceRow(
@@ -248,7 +314,12 @@ def final_row(
         order = int(method.removeprefix("NCC"))
         comp = result.ncc[order]
         x = time / steps
-        bias = comp_bias(result, method, steps, x)
+        if steps == r_precision:
+            bias = float(precision_row["bias_precision"])
+        else:
+            if len(comp.step_errors) == 0:
+                raise RuntimeError(f"{method} needs final-bias recomputation at r={steps}, but no error curve is available.")
+            bias = comp_bias(result, method, steps, x)
         norm_overhead = comp_norm_overhead(result, method, steps, x)
         formula_step = h.one_step_formula_gate_cost(result.formula_layers[comp.base_order], a_cost, b_cost)
         correction = h.ncc_correction_gate_stats(comp, x)
@@ -273,7 +344,12 @@ def final_row(
         order = int(method.removeprefix("HNCC"))
         comp = result.hncc[order]
         x = time / steps
-        bias = comp_bias(result, method, steps, x)
+        if steps == r_precision:
+            bias = float(precision_row["bias_precision"])
+        else:
+            if len(comp.step_errors) == 0:
+                raise RuntimeError(f"{method} needs final-bias recomputation at r={steps}, but no error curve is available.")
+            bias = comp_bias(result, method, steps, x)
         norm_overhead = comp_norm_overhead(result, method, steps, x)
         formula_step = h.one_step_formula_gate_cost(result.formula_layers[comp.base_order], a_cost, b_cost)
         correction = h.correction_gate_stats(comp, x)
@@ -307,8 +383,8 @@ def final_row(
     )
 
 
-def output_path(output_dir: Path, n: int, cap: float) -> Path:
-    return output_dir / f"hncc_resource_split_N{n}_cap_{cap_label(cap)}.json"
+def output_path(output_dir: Path, n: int, cap: float, error_norm: str) -> Path:
+    return output_dir / f"hncc_resource_split_N{n}_cap_{cap_label(cap)}{error_norm_suffix(error_norm)}.json"
 
 
 def main() -> None:
@@ -317,6 +393,8 @@ def main() -> None:
         raise ValueError("Use even N for the periodic even-odd decomposition.")
     if args.extrap_points != [3]:
         raise ValueError("This simplified comparison keeps only the 3-point extrapolation formula.")
+    if args.use_reference_final and args.precision_error_norm != "fro":
+        raise ValueError("--use-reference-final is only valid for the legacy Frobenius precision data.")
 
     default_q0 = {order: 2 * order + 2 for order in args.hncc_orders}
     default_s0 = {order: 2 * order + 2 for order in args.hncc_orders}
@@ -329,7 +407,13 @@ def main() -> None:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for n in args.n_values:
-        precision_payload = load_json(args.input_dir / f"r_for_expected_precision_N{n}.json")
+        precision_payload = load_json(args.input_dir / precision_file_name(n, args.precision_error_norm))
+        precision_metadata = precision_payload.get("metadata", {})
+        if precision_metadata.get("error_norm", "fro") != args.precision_error_norm:
+            raise ValueError(
+                f"precision file for N={n} has error_norm={precision_metadata.get('error_norm', 'fro')!r}, "
+                f"but requested {args.precision_error_norm!r}."
+            )
         result: h.EstimateResult | None = None
         a_cost: h.GateCost | None = None
         b_cost: h.GateCost | None = None
@@ -339,13 +423,16 @@ def main() -> None:
             if args.use_reference_final:
                 final_payload = load_json(reference_final_path(args.reference_dir, n, cap))
                 payload = add_split_provenance(final_payload, precision_payload, norm_payload, n, cap)
-                path = output_path(args.output_dir, n, cap)
+                path = output_path(args.output_dir, n, cap, args.precision_error_norm)
                 path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
                 print(f"Saved {path} from {reference_final_path(args.reference_dir, n, cap)}")
                 continue
 
             if result is None:
-                result = h.build_estimate(n, formula_orders, args.hncc_orders, args.ncc_orders, q0_by_order, s0_by_order, x_grid)
+                if args.skip_final_bias_recompute:
+                    result = build_resource_skeleton(n, formula_orders, args.hncc_orders, args.ncc_orders, q0_by_order, s0_by_order, x_grid, args.precision_error_norm)
+                else:
+                    result = h.build_estimate(n, formula_orders, args.hncc_orders, args.ncc_orders, q0_by_order, s0_by_order, x_grid, args.precision_error_norm)
                 a_cost = h.op_rotation_gate_cost(result.a_op)
                 b_cost = h.op_rotation_gate_cost(result.b_op)
             assert a_cost is not None and b_cost is not None
@@ -364,12 +451,13 @@ def main() -> None:
                     "eps": args.eps,
                     "time_values": args.time_values,
                     "fixed_eps": args.fixed_eps,
+                    "error_norm": args.precision_error_norm,
                     "sampling_overhead_cap": cap,
                     "x_min": args.x_min,
                     "x_max": args.x_max,
                     "num_x": args.num_x,
                     "scan": args.scan,
-                    "expected_precision_file": f"r_for_expected_precision_N{n}.json",
+                    "expected_precision_file": precision_file_name(n, args.precision_error_norm),
                     "one_norm_file": f"r_for_1_norm_N{n}_cap_{cap_label(cap)}.json",
                 },
                 "eps_scan": {},
@@ -391,7 +479,7 @@ def main() -> None:
                         for row in rows
                     ]
                 payload["time_scan"] = time_scan
-            path = output_path(args.output_dir, n, cap)
+            path = output_path(args.output_dir, n, cap, args.precision_error_norm)
             path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             print(f"Saved {path}")
 

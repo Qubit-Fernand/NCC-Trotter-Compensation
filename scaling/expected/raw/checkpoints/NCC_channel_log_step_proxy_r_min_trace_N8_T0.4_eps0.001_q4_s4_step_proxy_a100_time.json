@@ -1,0 +1,121 @@
+{
+  "script": "NCC_channel_step_proxy_r_min_cached.py",
+  "mode": "log",
+  "norm": "trace",
+  "criterion": "r * max_z ||E_step(T/r)(|z><z|) - U_step(T/r)(|z><z|)||",
+  "params": {
+    "N": 8,
+    "J": 1.0,
+    "h": 1.0,
+    "T": 0.4,
+    "epsilon": 0.001,
+    "r_max": 4096,
+    "s0": 4,
+    "q0": 4
+  },
+  "step_proxy_r_min": 13,
+  "step_error_at_min": 5.951902527005028e-05,
+  "total_proxy_error_at_min": 0.0007737473285106536,
+  "searches": [
+    {
+      "r": 1,
+      "step_error": 13.426497221156218,
+      "total_proxy_error": 13.426497221156218,
+      "worst_index": 170,
+      "norm": "trace",
+      "eta_pair_sum": 36.864000000000004,
+      "pair_scale": 2718.908992000005,
+      "raw_l1_norm_total": 3006.721258666672,
+      "accumulated_l1_norm": 3006.721258666674,
+      "log_accumulated_l1_norm": 8.008605481208205
+    },
+    {
+      "r": 2,
+      "step_error": 0.5146353611010577,
+      "total_proxy_error": 1.0292707222021154,
+      "worst_index": 85,
+      "norm": "trace",
+      "eta_pair_sum": 5.888,
+      "pair_scale": 70.33708800000007,
+      "raw_l1_norm_total": 88.32535466666675,
+      "accumulated_l1_norm": 7801.368276992474,
+      "log_accumulated_l1_norm": 8.962054417420612
+    },
+    {
+      "r": 4,
+      "step_error": 0.020601289286881482,
+      "total_proxy_error": 0.08240515714752593,
+      "worst_index": 85,
+      "norm": "trace",
+      "eta_pair_sum": 1.056,
+      "pair_scale": 3.230272000000001,
+      "raw_l1_norm_total": 4.354538666666668,
+      "accumulated_l1_norm": 359.5577094489021,
+      "log_accumulated_l1_norm": 5.88487469125689
+    },
+    {
+      "r": 8,
+      "step_error": 0.0006706796615537631,
+      "total_proxy_error": 0.005365437292430105,
+      "worst_index": 85,
+      "norm": "trace",
+      "eta_pair_sum": 0.21200000000000002,
+      "pair_scale": 1.0898880000000002,
+      "raw_l1_norm_total": 1.160154666666667,
+      "accumulated_l1_norm": 3.2819135002233257,
+      "log_accumulated_l1_norm": 1.1884266365080636
+    },
+    {
+      "r": 16,
+      "step_error": 2.109591288783773e-05,
+      "total_proxy_error": 0.0003375346062054037,
+      "worst_index": 85,
+      "norm": "trace",
+      "eta_pair_sum": 0.04650000000000001,
+      "pair_scale": 1.0043245,
+      "raw_l1_norm_total": 1.0087161666666666,
+      "accumulated_l1_norm": 1.1489568030231327,
+      "log_accumulated_l1_norm": 0.13885440287977024
+    },
+    {
+      "r": 12,
+      "step_error": 8.876438586654503e-05,
+      "total_proxy_error": 0.0010651726303985403,
+      "worst_index": 85,
+      "norm": "trace",
+      "eta_pair_sum": 0.08651851851851851,
+      "pair_scale": 1.0149709080932783,
+      "raw_l1_norm_total": 1.0288507434842247,
+      "accumulated_l1_norm": 1.4067875267881136,
+      "log_accumulated_l1_norm": 0.3413087552065567
+    },
+    {
+      "r": 14,
+      "step_error": 4.1106275975866965e-05,
+      "total_proxy_error": 0.0005754878636621375,
+      "worst_index": 85,
+      "norm": "trace",
+      "eta_pair_sum": 0.06194752186588922,
+      "pair_scale": 1.0076749909306495,
+      "raw_l1_norm_total": 1.0151669803794903,
+      "accumulated_l1_norm": 1.2345957186032626,
+      "log_accumulated_l1_norm": 0.21074356313045206
+    },
+    {
+      "r": 13,
+      "step_error": 5.951902527005028e-05,
+      "total_proxy_error": 0.0007737473285106536,
+      "worst_index": 85,
+      "norm": "trace",
+      "eta_pair_sum": 0.07271005917159763,
+      "pair_scale": 1.0105735054094744,
+      "raw_l1_norm_total": 1.0206506128870372,
+      "accumulated_l1_norm": 1.3043745272502494,
+      "log_accumulated_l1_norm": 0.26572363641533764
+    }
+  ],
+  "worst_index_at_min": 85,
+  "raw_l1_norm_total_at_min": 1.0206506128870372,
+  "accumulated_l1_norm_at_min": 1.3043745272502494,
+  "log_accumulated_l1_norm_at_min": 0.26572363641533764
+}

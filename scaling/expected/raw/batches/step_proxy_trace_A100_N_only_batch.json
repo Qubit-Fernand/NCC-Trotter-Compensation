@@ -1,0 +1,26 @@
+{
+  "defaults": {
+    "mode": "log",
+    "out_dir": "scaling/expected",
+    "J": 1.0,
+    "h": 1.0,
+    "q0": 4,
+    "s0": 4,
+    "r_max": 4096,
+    "save_every_search": true
+  },
+  "cases": [
+    {
+      "N": 4,
+      "T": 2.0,
+      "epsilon": 0.001,
+      "tag": "step_proxy_a100_N"
+    },
+    {
+      "N": 6,
+      "T": 2.0,
+      "epsilon": 0.001,
+      "tag": "step_proxy_a100_N"
+    }
+  ]
+}

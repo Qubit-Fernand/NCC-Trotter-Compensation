@@ -1,0 +1,78 @@
+{
+  "defaults": {
+    "mode": "original",
+    "out_dir": "scaling/expected",
+    "J": 1.0,
+    "h": 1.0,
+    "r_max": 4096,
+    "save_every_search": true
+  },
+  "cases": [
+    {
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.001,
+      "tag": "step_proxy_original_a100_time"
+    },
+    {
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.1,
+      "tag": "step_proxy_original_a100_eps"
+    },
+    {
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.04,
+      "tag": "step_proxy_original_a100_eps"
+    },
+    {
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.02,
+      "tag": "step_proxy_original_a100_eps"
+    },
+    {
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.01,
+      "tag": "step_proxy_original_a100_eps"
+    },
+    {
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.005,
+      "tag": "step_proxy_original_a100_eps"
+    },
+    {
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.0025,
+      "tag": "step_proxy_original_a100_eps"
+    },
+    {
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.001,
+      "tag": "step_proxy_original_a100_eps"
+    },
+    {
+      "N": 4,
+      "T": 2.0,
+      "epsilon": 0.001,
+      "tag": "step_proxy_original_a100_N"
+    },
+    {
+      "N": 6,
+      "T": 2.0,
+      "epsilon": 0.001,
+      "tag": "step_proxy_original_a100_N"
+    },
+    {
+      "N": 8,
+      "T": 2.0,
+      "epsilon": 0.001,
+      "tag": "step_proxy_original_a100_N"
+    }
+  ]
+}

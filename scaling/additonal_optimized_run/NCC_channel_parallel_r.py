@@ -246,6 +246,14 @@ def trace_norm_batch(matrices: np.ndarray) -> np.ndarray:
         return np.array([trace_norm(matrices)], dtype=float)
     if matrices.ndim != 3:
         raise ValueError(f"expected matrix batch with ndim 2 or 3, got shape={matrices.shape}")
+    if matrices.shape[-1] == matrices.shape[-2] and np.allclose(
+        matrices,
+        np.swapaxes(matrices.conj(), -1, -2),
+        rtol=1e-10,
+        atol=1e-12,
+    ):
+        hermitian = 0.5 * (matrices + np.swapaxes(matrices.conj(), -1, -2))
+        return np.sum(np.abs(np.linalg.eigvalsh(hermitian)), axis=-1).astype(float, copy=False)
     return np.sum(np.linalg.svd(matrices, compute_uv=False), axis=-1).astype(float, copy=False)
 
 

@@ -479,9 +479,157 @@ def product_formula_matrix(layers: Sequence[Layer], x: float, a_eigh: EighData, 
     return out
 
 
-def max_basis_fro_error(u_mat: np.ndarray, approx_mat: np.ndarray) -> float:
+ERROR_NORMS = ("fro", "trace")
+
+
+def max_basis_state_error(u_mat: np.ndarray, approx_mat: np.ndarray, error_norm: str = "fro") -> float:
+    if error_norm not in ERROR_NORMS:
+        raise ValueError(f"unsupported error norm {error_norm!r}")
     overlaps = np.sum(approx_mat.conj() * u_mat, axis=0)
-    return float(np.sqrt(np.maximum(2.0 - 2.0 * np.abs(overlaps) ** 2, 0.0)).max())
+    infidelities = np.maximum(1.0 - np.abs(overlaps) ** 2, 0.0)
+    if error_norm == "fro":
+        return float(np.sqrt(2.0 * infidelities).max())
+    return float((2.0 * np.sqrt(infidelities)).max())
+
+
+def max_basis_fro_error(u_mat: np.ndarray, approx_mat: np.ndarray) -> float:
+    return max_basis_state_error(u_mat, approx_mat, "fro")
+
+
+def density_error_norm(diff: np.ndarray, error_norm: str = "fro") -> float:
+    if error_norm not in ERROR_NORMS:
+        raise ValueError(f"unsupported error norm {error_norm!r}")
+    if error_norm == "fro":
+        return float(np.linalg.norm(diff, ord="fro"))
+    hermitian_diff = 0.5 * (diff + diff.conj().T)
+    return float(np.sum(np.abs(np.linalg.eigvalsh(hermitian_diff))))
+
+
+def low_rank_trace_norm(
+    left_vectors: Sequence[np.ndarray],
+    right_vectors: Sequence[np.ndarray],
+    coeffs: Sequence[complex],
+) -> float:
+    """Trace norm of sum_j coeffs[j] |left_j><right_j| from a small SVD."""
+    left = np.column_stack(left_vectors)
+    right = np.column_stack(right_vectors)
+
+    def gram_factor(mat: np.ndarray) -> np.ndarray:
+        gram = mat.conj().T @ mat
+        vals, vecs = np.linalg.eigh(0.5 * (gram + gram.conj().T))
+        keep = vals > 1e-13 * max(1.0, float(np.max(vals)))
+        if not np.any(keep):
+            return np.zeros((0, mat.shape[1]), dtype=complex)
+        return np.diag(np.sqrt(vals[keep])) @ vecs[:, keep].conj().T
+
+    left_factor = gram_factor(left)
+    right_factor = gram_factor(right)
+    small = left_factor @ np.diag(np.asarray(coeffs, dtype=complex)) @ right_factor.conj().T
+    return float(np.sum(np.linalg.svd(small, compute_uv=False)))
+
+
+def append_commutator_terms(
+    terms: Sequence[Tuple[complex, np.ndarray, np.ndarray]],
+    mat: np.ndarray,
+) -> List[Tuple[complex, np.ndarray, np.ndarray]]:
+    mat_dag = mat.conj().T
+    out = []
+    for coeff, left, right in terms:
+        out.append((coeff, mat @ left, right))
+        out.append((-coeff, left, mat_dag @ right))
+    return out
+
+
+def hncc_trace_error_for_basis_state(
+    psi_s: np.ndarray,
+    psi_u: np.ndarray,
+    omega_mats: Mapping[int, np.ndarray],
+    x: float,
+    lead_order: int,
+    q0: int,
+    s0: int,
+) -> float:
+    left_vectors = [psi_s, psi_u]
+    right_vectors = [psi_s, psi_u]
+    coeffs: List[complex] = [1.0, -1.0]
+
+    orders = tuple(range(lead_order, q0 + 1))
+    for tup in ordered_tuples_with_sum(orders, s0):
+        terms: List[Tuple[complex, np.ndarray, np.ndarray]] = [(1.0, psi_s, psi_s)]
+        for order in reversed(tup):
+            terms = append_commutator_terms(terms, (x**order) * omega_mats[order])
+        prefactor = 1.0 / math.factorial(len(tup))
+        for coeff, left, right in terms:
+            left_vectors.append(left)
+            right_vectors.append(right)
+            coeffs.append(prefactor * coeff)
+    return low_rank_trace_norm(left_vectors, right_vectors, coeffs)
+
+
+def hncc_trace_term_specs(
+    lead_order: int,
+    q0: int,
+    s0: int,
+) -> List[Tuple[Tuple[int, ...], Tuple[int, ...], complex, int]]:
+    specs: List[Tuple[Tuple[int, ...], Tuple[int, ...], complex, int]] = []
+    orders = tuple(range(lead_order, q0 + 1))
+    for tup in ordered_tuples_with_sum(orders, s0):
+        terms: List[Tuple[complex, Tuple[int, ...], Tuple[int, ...]]] = [(1.0, (), ())]
+        for order in reversed(tup):
+            new_terms = []
+            for coeff, left_seq, right_seq in terms:
+                new_terms.append((coeff, left_seq + (order,), right_seq))
+                new_terms.append((-coeff, left_seq, right_seq + (order,)))
+            terms = new_terms
+        prefactor = 1.0 / math.factorial(len(tup))
+        for coeff, left_seq, right_seq in terms:
+            specs.append((left_seq, right_seq, prefactor * coeff, sum(left_seq) + sum(right_seq)))
+    return specs
+
+
+def sequence_batches(
+    s_mat: np.ndarray,
+    omega_mats: Mapping[int, np.ndarray],
+    sequences: Iterable[Tuple[int, ...]],
+    adjoint: bool = False,
+) -> Dict[Tuple[int, ...], np.ndarray]:
+    cache: Dict[Tuple[int, ...], np.ndarray] = {(): s_mat}
+    for seq in sorted(set(sequences), key=len):
+        if seq == ():
+            continue
+        prefix = seq[:-1]
+        if prefix not in cache:
+            raise ValueError(f"missing prefix {prefix} for sequence {seq}")
+        mat = omega_mats[seq[-1]].conj().T if adjoint else omega_mats[seq[-1]]
+        cache[seq] = mat @ cache[prefix]
+    return cache
+
+
+def hncc_trace_step_error(
+    x: float,
+    u_mat: np.ndarray,
+    s_mat: np.ndarray,
+    omega_mats: Mapping[int, np.ndarray],
+    lead_order: int,
+    q0: int,
+    s0: int,
+) -> float:
+    specs = hncc_trace_term_specs(lead_order, q0, s0)
+    left_batches = sequence_batches(s_mat, omega_mats, (spec[0] for spec in specs), adjoint=False)
+    right_batches = sequence_batches(s_mat, omega_mats, (spec[1] for spec in specs), adjoint=True)
+
+    max_err = 0.0
+    dim = u_mat.shape[0]
+    for z in range(dim):
+        left_vectors = [s_mat[:, z], u_mat[:, z]]
+        right_vectors = [s_mat[:, z], u_mat[:, z]]
+        coeffs: List[complex] = [1.0, -1.0]
+        for left_seq, right_seq, coeff, power in specs:
+            left_vectors.append(left_batches[left_seq][:, z])
+            right_vectors.append(right_batches[right_seq][:, z])
+            coeffs.append(coeff * (x**power))
+        max_err = max(max_err, low_rank_trace_norm(left_vectors, right_vectors, coeffs))
+    return max_err
 
 
 def commutator(a: np.ndarray, rho: np.ndarray) -> np.ndarray:
@@ -523,7 +671,10 @@ def hncc_step_error(
     lead_order: int,
     q0: int,
     s0: int,
+    error_norm: str = "fro",
 ) -> float:
+    if error_norm == "trace":
+        return hncc_trace_step_error(x, u_mat, s_mat, omega_mats, lead_order, q0, s0)
     max_err = 0.0
     dim = u_mat.shape[0]
     for z in range(dim):
@@ -532,7 +683,7 @@ def hncc_step_error(
         rho_s = np.outer(psi_s, psi_s.conj())
         rho_u = np.outer(psi_u, psi_u.conj())
         rho_comp = apply_hncc_map(rho_s, omega_mats, x, lead_order, q0, s0)
-        max_err = max(max_err, float(np.linalg.norm(rho_comp - rho_u, ord="fro")))
+        max_err = max(max_err, density_error_norm(rho_comp - rho_u, error_norm))
     return max_err
 
 
@@ -556,6 +707,7 @@ def ncc_step_error(
     omega_mats: Mapping[int, np.ndarray],
     lead_order: int,
     q0: int,
+    error_norm: str = "fro",
 ) -> float:
     """Channel error induced by unitary-level NCC cross-term estimation."""
     comp = ncc_compensation_operator(omega_mats, x, lead_order, q0)
@@ -565,9 +717,12 @@ def ncc_step_error(
     for z in range(dim):
         psi_u = u_mat[:, z]
         psi_comp = approx_op[:, z]
+        if error_norm == "trace":
+            max_err = max(max_err, low_rank_trace_norm([psi_comp, psi_u], [psi_comp, psi_u], [1.0, -1.0]))
+            continue
         rho_u = np.outer(psi_u, psi_u.conj())
         rho_comp = np.outer(psi_comp, psi_comp.conj())
-        max_err = max(max_err, float(np.linalg.norm(rho_comp - rho_u, ord="fro")))
+        max_err = max(max_err, density_error_norm(rho_comp - rho_u, error_norm))
     return max_err
 
 
@@ -847,6 +1002,7 @@ def extrapolation_channel_error(
     a_eigh: EighData,
     b_eigh: EighData,
     layers_by_order: Mapping[int, List[Layer]],
+    error_norm: str = "fro",
 ) -> float:
     exact = unitary_from_eigh(h_eigh, time, -1j)
     base_layers = layers_by_order[formula.base_order]
@@ -860,12 +1016,19 @@ def extrapolation_channel_error(
     dim = exact.shape[0]
     for z in range(dim):
         psi_exact = exact[:, z]
+        if error_norm == "trace":
+            approx_vectors = [approx[:, z] for approx in approx_unitaries]
+            left_vectors = [*approx_vectors, psi_exact]
+            right_vectors = [*approx_vectors, psi_exact]
+            coeffs = [*formula.coeffs, -1.0]
+            max_error = max(max_error, low_rank_trace_norm(left_vectors, right_vectors, coeffs))
+            continue
         rho_exact = np.outer(psi_exact, psi_exact.conj())
         rho_extrap = np.zeros_like(rho_exact)
         for coeff, approx in zip(formula.coeffs, approx_unitaries):
             psi = approx[:, z]
             rho_extrap += coeff * np.outer(psi, psi.conj())
-        max_error = max(max_error, float(np.linalg.norm(rho_extrap - rho_exact, ord="fro")))
+        max_error = max(max_error, density_error_norm(rho_extrap - rho_exact, error_norm))
     return max_error
 
 
@@ -914,6 +1077,7 @@ class EstimateResult:
     hncc: Dict[int, HnccData]
     ncc: Dict[int, NccData]
     x_grid: np.ndarray
+    error_norm: str = "fro"
 
 
 @dataclass
@@ -1031,6 +1195,7 @@ def find_min_extrapolation_steps(
                 result.a_eigh,
                 result.b_eigh,
                 result.formula_layers,
+                result.error_norm,
             )
         return cache[macro_steps]
 
@@ -1057,7 +1222,10 @@ def build_estimate(
     q0_by_order: Mapping[int, int],
     s0_by_order: Mapping[int, int],
     x_grid: np.ndarray,
+    error_norm: str = "fro",
 ) -> EstimateResult:
+    if error_norm not in ERROR_NORMS:
+        raise ValueError(f"unsupported error norm {error_norm!r}")
     a_op, b_op, h_op = heisenberg_even_odd(n)
     gamma = len(h_op)
     formula_orders = tuple(sorted(set(formula_orders) | set(hncc_orders) | set(ncc_orders)))
@@ -1076,7 +1244,7 @@ def build_estimate(
         exact = unitary_from_eigh(h_eigh, x, -1j)
         for order in formula_orders:
             approx = product_formula_matrix(formula_layers[order], x, a_eigh, b_eigh)
-            formula_errors[order].append(max_basis_fro_error(exact, approx))
+            formula_errors[order].append(max_basis_state_error(exact, approx, error_norm))
     formula_error_arrays = {order: np.array(vals) for order, vals in formula_errors.items()}
 
     hncc_data: Dict[int, HnccData] = {}
@@ -1112,7 +1280,7 @@ def build_estimate(
             for x in x_grid:
                 exact = unitary_from_eigh(h_eigh, x, -1j)
                 s_mat = product_formula_matrix(formula_layers[order], x, a_eigh, b_eigh)
-                step_errors.append(ncc_step_error(x, exact, s_mat, omega_mats, lead, ncc_q0))
+                step_errors.append(ncc_step_error(x, exact, s_mat, omega_mats, lead, ncc_q0, error_norm))
             print(f"  NCC{order}: compensating orders {lead} through {ncc_q0}")
             ncc_data[order] = NccData(order, lead, ncc_q0, omega_poly, omega_mats, norms, np.array(step_errors))
 
@@ -1125,7 +1293,7 @@ def build_estimate(
             for x in x_grid:
                 exact = unitary_from_eigh(h_eigh, x, -1j)
                 s_mat = product_formula_matrix(formula_layers[order], x, a_eigh, b_eigh)
-                step_errors.append(hncc_step_error(x, exact, s_mat, omega_mats, lead, q0, s0))
+                step_errors.append(hncc_step_error(x, exact, s_mat, omega_mats, lead, q0, s0, error_norm))
             norm_poly = hncc_norm_poly(norms, lead, q0, s0)
             print(f"  HNCC{order}: q0={q0}, s0={s0}")
             print("  HNCC lambda_step(x)-1 terms: " + ", ".join(f"x^{q}:{c:.6g}" for q, c in sorted(norm_poly.items()) if q > 0))
@@ -1143,6 +1311,7 @@ def build_estimate(
         hncc=hncc_data,
         ncc=ncc_data,
         x_grid=x_grid,
+        error_norm=error_norm,
     )
 
 

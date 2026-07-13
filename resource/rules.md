@@ -14,7 +14,8 @@ This folder keeps the HNCC resource-estimate scripts and data products.
 - `r_for_expected_precision.py`
   Split-pipeline stage for the expected-precision constraint only. It computes
   `r_precision` from
-  `r * expected_error(T / r) <= epsilon`.
+  `r * expected_error(T / r) <= epsilon`. The default expected-error norm is now
+  the basis-state trace norm.
 
 - `r_for_1_norm.py`
   Split-pipeline stage for the accumulated 1-norm constraint only. It computes
@@ -27,6 +28,68 @@ This folder keeps the HNCC resource-estimate scripts and data products.
   at `r_final`, multiplies by per-step gate costs, and writes final resource
   rows. For reproducing existing legacy final files without rerunning dense
   step-error curves, use `--use-reference-final`.
+
+## Current Split-Pipeline Workflow
+
+The current resource-estimate workflow is the split pipeline in the `resource`
+root, not the legacy all-in-one collector.
+
+1. Run `r_for_expected_precision.py` to generate
+   `data/split_constraints/r_for_expected_precision_N*_trace.json` by default.
+   This stage imports `cluster/hncc_resource_estimate.py`, builds the step-error
+   curves, and solves the expected-precision constraint
+   `r * expected_error(T / r) <= epsilon`. Use `--error-norm fro` only to
+   reproduce the legacy Frobenius files without the `_trace` suffix.
+
+2. Run `r_for_1_norm.py` to generate
+   `data/split_constraints/r_for_1_norm_N*_cap_*.json`. This stage also imports
+   `cluster/hncc_resource_estimate.py`, but it only needs the Pauli 1-norm
+   polynomials for NCC/HNCC and solves the accumulated normalization constraint
+   `lambda(T / r)^r <= cap`.
+
+3. Run `hncc_resource.py` to merge the two constraint files. By default it reads
+   the `_trace` expected-precision file and writes final rows with a `_trace`
+   suffix. For each method and scan point, it uses
+   `r = max(r_precision, r_1_norm)`, records `active_constraint`, recomputes the
+   final bias and normalization overhead at that selected `r`, and applies the
+   shared per-step gate-cost model. For plotting-only updates where
+   `r_1_norm <= r_precision` for every row, use `--skip-final-bias-recompute` to
+   skip the expensive final bias recomputation and reuse `bias_precision`.
+
+The current resource-estimate precision constraint uses the basis-state
+worst-case trace norm. The old plotted legacy resource data used the
+basis-state Frobenius proxy implemented in `cluster/hncc_resource_estimate.py`
+(`max_basis_fro_error` and the historical HNCC/NCC/extrapolation `ord="fro"`
+calls). Neither version is a diamond-norm constraint. The repetition panel in
+the plots is separate: it comes from the accumulated sampling normalization
+factor `lambda^r`, not from the error norm.
+
+Current main data notes:
+
+- For `N=8`, the split files can be generated directly and then merged with
+  `hncc_resource.py`.
+
+- For `N=10`, the trace-norm expected-precision file
+  `data/split_constraints/r_for_expected_precision_N10_trace.json` was generated
+  locally with `python resource/r_for_expected_precision.py --N 10 --scan both`.
+  It contains both the target-precision sweep and the simulation-time sweep. The
+  HNCC trace-norm step-error calculation uses a low-rank outer-product
+  representation of each basis-state density difference, with batched
+  applications of the BCH matrices for each step size. This computes the same
+  trace norm as the dense density-matrix eigensolver but avoids repeated
+  full-size `1024 x 1024` decompositions.
+
+- The current `N=10`, cap `1.75`, trace-norm final resource rows were generated
+  with `python resource/hncc_resource.py --N 10 --sampling-overhead-cap 1.75
+  --scan both --skip-final-bias-recompute`, using the existing 1-norm file
+  `data/split_constraints/r_for_1_norm_N10_cap_1p75.json`.
+
+- For `N=10`, the legacy Frobenius split files seed `r_for_expected_precision_N10.json`
+  from `data/hncc_resource_data_N10_cap_e.json`, because recomputing the dense
+  HNCC step-error curve remains slow. The final split files are then produced
+  with `hncc_resource.py --use-reference-final`, which adds
+  `r_precision`, `r_1_norm`, and `active_constraint` provenance to the validated
+  legacy final rows.
 
 ## Legacy Final Data
 
